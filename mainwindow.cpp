@@ -11,6 +11,7 @@
 MainWindow::MainWindow(QWidget* parent)
     : QMainWindow(parent)
     , m_updating(false)
+	, m_formulaEditMode(false)
 {
     setupUI();
     setupToolBar();
@@ -83,6 +84,7 @@ void MainWindow::setupFormulaBar()
     m_mainLayout->addWidget(m_formulaWidget);
 
     connect(m_formulaEdit, &QLineEdit::editingFinished, this, &MainWindow::onFormulaEditFinished);
+    connect(m_formulaEdit, &QLineEdit::textChanged, this, &MainWindow::onFormulaTextChanged);
 }
 
 void MainWindow::setupTableView()
@@ -110,6 +112,8 @@ void MainWindow::setupTableView()
         [this](const QPoint& pos) {
             m_contextMenu->exec(m_tableView->mapToGlobal(pos));
         });
+
+    connect(m_tableView, &QTableView::clicked, this, &MainWindow::onCellClicked);
 }
 
 void MainWindow::setupContextMenu()
@@ -157,8 +161,11 @@ void MainWindow::onCurrentCellChanged(const QModelIndex& current, const QModelIn
 {
     Q_UNUSED(previous)
 
-        if (m_updating)
-            return;
+    if (m_updating)
+        return;
+	// 如果在公式编辑模式下，不更新当前单元格
+    if (m_formulaEditMode)
+        return;
 
     m_currentIndex = current;
     updateFormulaBar(current);
@@ -169,11 +176,46 @@ void MainWindow::onFormulaEditFinished()
     if (m_updating || !m_currentIndex.isValid())
         return;
 
+    // 退出公式编辑模式
+    if (m_formulaEditMode)
+    {
+		exitFormulaEditMode();
+    }
+
     QString text = m_formulaEdit->text();
     m_updating = true;
     m_dataModel->setData(m_currentIndex, text, Qt::EditRole);
     m_updating = false;
 }
+
+void MainWindow::enterFormulaEditMode()
+{
+    m_formulaEditMode = true;
+    m_formulaEditingIndex = m_currentIndex;
+
+    // 改变公式编辑框的样式，提示用户进入了公式编辑模式
+    m_formulaEdit->setStyleSheet("QLineEdit { border: 2px solid blue; padding: 2px; background-color: #f0f8ff; }");
+
+    // 可以在状态栏显示提示信息
+    //statusBar()->showMessage("公式编辑模式：点击单元格插入引用，按Enter完成编辑", 5000);
+}
+
+void MainWindow::exitFormulaEditMode()
+{
+    m_formulaEditMode = false;
+    m_formulaEditingIndex = QModelIndex();
+
+    // 恢复公式编辑框的正常样式
+    m_formulaEdit->setStyleSheet("QLineEdit { border: 1px solid gray; padding: 2px; }");
+
+    //statusBar()->clearMessage();
+}
+
+bool MainWindow::isInFormulaEditMode() const
+{
+    return m_formulaEditMode;
+}
+
 
 void MainWindow::onCellChanged(int row, int col)
 {
@@ -182,6 +224,62 @@ void MainWindow::onCellChanged(int row, int col)
         m_currentIndex.column() == col) {
         updateFormulaBar(m_currentIndex);
     }
+}
+
+void MainWindow::onCellClicked(const QModelIndex& index)
+{
+    if (!index.isValid())
+    {
+        return;
+    }
+    // 如果在公式编辑状态下，将点击的单元格地址添加到公式中
+    if (m_formulaEditMode)
+    {
+        QString cellAddress = m_dataModel->cellAddress(index.row(), index.column());
+
+        // 获取当前光标位置
+        int cursorPos = m_formulaEdit->cursorPosition();
+        QString currentText = m_formulaEdit->text();
+
+        // 在光标位置插入单元格地址
+        QString newText = currentText.left(cursorPos) + cellAddress + currentText.mid(cursorPos);
+        
+        m_updating = true;
+        m_formulaEdit->setText(newText);
+        m_formulaEdit->setCursorPosition(cursorPos + cellAddress.length());
+        m_formulaEdit->setFocus(); // 保持焦点在公式编辑框
+		m_updating = false;
+        
+        return;
+    }
+
+    // 正常模式下的单元格切换
+    if (index != m_currentIndex)
+    {
+        m_currentIndex = index;
+        updateFormulaBar(index);
+    }
+
+}
+
+void MainWindow::onFormulaTextChanged()
+{
+    if (m_updating)
+    {
+        return;
+    }
+
+    QString text = m_formulaEdit->text();
+
+    if (text.startsWith('=') && !m_formulaEditMode)
+    {
+        enterFormulaEditMode();
+    }
+    else if (!text.startsWith('=') && m_formulaEditMode)
+    {
+        exitFormulaEditMode();
+    }
+
 }
 
 void MainWindow::updateFormulaBar(const QModelIndex& index)
@@ -194,11 +292,26 @@ void MainWindow::updateFormulaBar(const QModelIndex& index)
 
     m_updating = true;
 
+	// 更新单元格名称和公式内容
     QString cellName = m_dataModel->cellAddress(index.row(), index.column());
     m_cellNameLabel->setText(cellName);
 
+    //  获取单元格的编辑数据（如果公式则显示公式，否则显示值）
     QVariant editData = m_dataModel->data(index, Qt::EditRole);
     m_formulaEdit->setText(editData.toString());
+
+    // 检查是否应该进入公式编辑模式
+    if (editData.toString().startsWith('=')) {
+        // 如果新选中的单元格包含公式，但我们不在编辑模式，不要自动进入
+        // 只有用户开始编辑时才进入公式编辑模式
+
+        // 可以给公式编辑框一个特殊的样式提示，表明这是一个公式单元格
+        m_formulaEdit->setStyleSheet("QLineEdit { border: 1px solid #4CAF50; padding: 2px; background-color: #f9fff9; }");
+    }
+    else {
+        // 普通单元格的样式
+        m_formulaEdit->setStyleSheet("QLineEdit { border: 1px solid gray; padding: 2px; }");
+    }
 
     m_updating = false;
 }

@@ -35,6 +35,8 @@ private slots:
 
     void onCurrentCellChanged(const QModelIndex& current, const QModelIndex& previous);
     void onFormulaEditFinished();
+    void onFormulaTextChanged(); // 新增：监听公式编辑变化
+    void onCellClicked(const QModelIndex& index); // 新增：处理单元格点击
     void onCellChanged(int row, int col);
 
     void onInsertRow();
@@ -49,6 +51,10 @@ private:
     void setupTableView();
     void setupContextMenu();
     void updateFormulaBar(const QModelIndex& index);
+
+    void enterFormulaEditMode(); // 新增
+    void exitFormulaEditMode();  // 新增
+    bool isInFormulaEditMode() const; // 新增
 
 private:
     // UI组件
@@ -73,6 +79,8 @@ private:
     // 状态
     QModelIndex m_currentIndex;
     bool m_updating;
+    bool m_formulaEditMode; // 新增：标识是否在公式编辑模式
+    QModelIndex m_formulaEditingIndex; // 新增：记录正在编辑公式的单元格
 };
 
 #endif // MAINWINDOW_H

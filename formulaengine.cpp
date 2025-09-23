@@ -1,11 +1,8 @@
 ﻿#include "formulaengine.h"
 #include "reportdatamodel.h"
 #include <QRegularExpression>
-
-FormulaEngine::FormulaEngine(QObject* parent)
-    : QObject(parent)
-{
-}
+#include <QStack>
+#include <QQueue>
 
 QVariant FormulaEngine::evaluate(const QString& formula, ReportDataModel* model, int currentRow, int currentCol)
 {
@@ -17,147 +14,190 @@ QVariant FormulaEngine::evaluate(const QString& formula, ReportDataModel* model,
 
     QString expr = formula.mid(1).trimmed(); // 去掉 '='
 
-    // 简单的SUM函数处理
-    QRegularExpression sumRegex(R"(SUM\(([A-Z]+\d+:[A-Z]+\d+)\))");
-    QRegularExpressionMatch match = sumRegex.match(expr);
+    // 优先检查是否为函数调用
+    QRegularExpression functionRegex(R"(^(SUM|MAX|MIN)\s*\([^)]+\)$)");
+    QRegularExpressionMatch functionMatch = functionRegex.match(expr);
 
-    if (match.hasMatch()) {
-        QString range = match.captured(1);
-        return evaluateSum(range, model);
-    }
-
-    // 简单的MAX函数处理
-    QRegularExpression maxRegex(R"(MAX\(([A-Z]+\d+:[A-Z]+\d+)\))");
-    match = maxRegex.match(expr);
-
-    if (match.hasMatch()) {
-        QString range = match.captured(1);
-        return evaluateMax(range, model);
-    }
-
-    // 简单的MIN函数处理
-    QRegularExpression minRegex(R"(MIN\(([A-Z]+\d+:[A-Z]+\d+)\))");
-    match = minRegex.match(expr);
-
-    if (match.hasMatch()) {
-        QString range = match.captured(1);
-        return evaluateMin(range, model);
-    }
-
-    return formula;
-}
-
-bool FormulaEngine::isFormula(const QString& text) const
-{
-    return !text.isEmpty() && text.startsWith('=');
-}
-
-QVariant FormulaEngine::evaluateSum(const QString& range, ReportDataModel* model)
-{
-    QPair<QPoint, QPoint> rangePair = parseRange(range);
-    QPoint start = rangePair.first;
-    QPoint end = rangePair.second;
-
-    double sum = 0.0;
-    bool hasValidData = false;
-
-    for (int row = start.x(); row <= end.x(); ++row) {
-        for (int col = start.y(); col <= end.y(); ++col) {
-            const RTCell* cell = model->getCell(row, col);
-            if (cell) {
-                bool ok;
-                double value = cell->value.toDouble(&ok);
-                if (ok) {
-                    sum += value;
-                    hasValidData = true;
-                }
+    if (functionMatch.hasMatch()) {
+        // 处理函数
+        if (expr.startsWith("SUM")) {
+            QRegularExpression sumRegex(R"(SUM\(([A-Z]+\d+:[A-Z]+\d+)\))");
+            QRegularExpressionMatch match = sumRegex.match(expr);
+            if (match.hasMatch()) {
+                return evaluateSum(match.captured(1), model);
+            }
+        }
+        else if (expr.startsWith("MAX")) {
+            QRegularExpression maxRegex(R"(MAX\(([A-Z]+\d+:[A-Z]+\d+)\))");
+            QRegularExpressionMatch match = maxRegex.match(expr);
+            if (match.hasMatch()) {
+                return evaluateMax(match.captured(1), model);
+            }
+        }
+        else if (expr.startsWith("MIN")) {
+            QRegularExpression minRegex(R"(MIN\(([A-Z]+\d+:[A-Z]+\d+)\))");
+            QRegularExpressionMatch match = minRegex.match(expr);
+            if (match.hasMatch()) {
+                return evaluateMin(match.captured(1), model);
             }
         }
     }
 
-    return hasValidData ? QVariant(sum) : QVariant(0);
+    // 如果不是函数，尝试作为表达式处理
+    return evaluateExpression(expr, model);
 }
 
-QVariant FormulaEngine::evaluateMax(const QString& range, ReportDataModel* model)
+QVariant FormulaEngine::evaluateExpression(const QString& expression, ReportDataModel* model)
 {
-    QPair<QPoint, QPoint> rangePair = parseRange(range);
-    QPoint start = rangePair.first;
-    QPoint end = rangePair.second;
+    // 1. 预处理：将单元格引用替换为实际值
+    QString processedExpr = preprocessExpression(expression, model);
 
-    double maxVal = -std::numeric_limits<double>::infinity();
-    bool hasValidData = false;
+    // 2. 计算算术表达式
+    return calculateArithmetic(processedExpr);
+}
 
-    for (int row = start.x(); row <= end.x(); ++row) {
-        for (int col = start.y(); col <= end.y(); ++col) {
-            const RTCell* cell = model->getCell(row, col);
-            if (cell) {
-                bool ok;
-                double value = cell->value.toDouble(&ok);
-                if (ok) {
-                    maxVal = qMax(maxVal, value);
-                    hasValidData = true;
-                }
-            }
+QString FormulaEngine::preprocessExpression(const QString& expression, ReportDataModel* model)
+{
+    QString result = expression;
+
+    // 匹配单元格引用（如A1, B2, AA10等）
+    QRegularExpression cellRefRegex(R"([A-Z]+\d+)");
+    QRegularExpressionMatchIterator it = cellRefRegex.globalMatch(expression);
+
+    // 从后往前替换，避免位置偏移
+    QList<QRegularExpressionMatch> matches;
+    while (it.hasNext()) {
+        matches.append(it.next());
+    }
+
+    for (int i = matches.size() - 1; i >= 0; --i) {
+        const QRegularExpressionMatch& match = matches[i];
+        QString cellRef = match.captured(0);
+        QVariant cellValue = getCellValue(cellRef, model);
+
+        // 将单元格值转换为数字字符串
+        bool ok;
+        double numValue = cellValue.toDouble(&ok);
+        if (!ok) {
+            numValue = 0.0; // 如果不是数字，当作0处理
         }
+
+        result.replace(match.capturedStart(), match.capturedLength(), QString::number(numValue));
     }
 
-    return hasValidData ? QVariant(maxVal) : QVariant();
+    return result;
 }
 
-QVariant FormulaEngine::evaluateMin(const QString& range, ReportDataModel* model)
+QVariant FormulaEngine::calculateArithmetic(const QString& expression)
 {
-    QPair<QPoint, QPoint> rangePair = parseRange(range);
-    QPoint start = rangePair.first;
-    QPoint end = rangePair.second;
+    // 使用调度场算法（Shunting Yard Algorithm）计算表达式
+    QStack<double> numbers;
+    QStack<QChar> operators;
 
-    double minVal = std::numeric_limits<double>::infinity();
-    bool hasValidData = false;
+    QString cleanExpr = expression;
+    cleanExpr.remove(' '); // 移除空格
 
-    for (int row = start.x(); row <= end.x(); ++row) {
-        for (int col = start.y(); col <= end.y(); ++col) {
-            const RTCell* cell = model->getCell(row, col);
-            if (cell) {
-                bool ok;
-                double value = cell->value.toDouble(&ok);
-                if (ok) {
-                    minVal = qMin(minVal, value);
-                    hasValidData = true;
-                }
+    int i = 0;
+    while (i < cleanExpr.length()) {
+        QChar c = cleanExpr[i];
+
+        if (c.isDigit() || c == '.') {
+            // 读取完整的数字
+            QString numStr;
+            while (i < cleanExpr.length() && (cleanExpr[i].isDigit() || cleanExpr[i] == '.')) {
+                numStr += cleanExpr[i];
+                i++;
             }
+            numbers.push(numStr.toDouble());
+            continue;
         }
+        else if (c == '(') {
+            operators.push(c);
+        }
+        else if (c == ')') {
+            while (!operators.isEmpty() && operators.top() != '(') {
+                QChar op = operators.pop();
+                if (numbers.size() < 2) return QVariant(); // 错误
+                double right = numbers.pop();
+                double left = numbers.pop();
+                numbers.push(applyOperator(left, right, op));
+            }
+            if (!operators.isEmpty()) operators.pop(); // 移除 '('
+        }
+        else if (isOperator(c)) {
+            while (!operators.isEmpty() &&
+                operators.top() != '(' &&
+                getOperatorPrecedence(operators.top()) >= getOperatorPrecedence(c)) {
+                QChar op = operators.pop();
+                if (numbers.size() < 2) return QVariant(); // 错误
+                double right = numbers.pop();
+                double left = numbers.pop();
+                numbers.push(applyOperator(left, right, op));
+            }
+            operators.push(c);
+        }
+
+        i++;
     }
 
-    return hasValidData ? QVariant(minVal) : QVariant();
-}
-
-QPoint FormulaEngine::parseReference(const QString& ref) const
-{
-    QRegularExpression regex(R"(([A-Z]+)(\d+))");
-    QRegularExpressionMatch match = regex.match(ref);
-
-    if (!match.hasMatch())
-        return QPoint(-1, -1);
-
-    QString colStr = match.captured(1);
-    int row = match.captured(2).toInt() - 1;
-
-    int col = 0;
-    for (QChar c : colStr) {
-        col = col * 26 + (c.unicode() - 'A' + 1);
+    // 处理剩余的操作符
+    while (!operators.isEmpty()) {
+        QChar op = operators.pop();
+        if (numbers.size() < 2) return QVariant(); // 错误
+        double right = numbers.pop();
+        double left = numbers.pop();
+        numbers.push(applyOperator(left, right, op));
     }
-    col -= 1;
 
-    return QPoint(row, col);
+    if (numbers.size() == 1) {
+        return numbers.top();
+    }
+
+    return QVariant(); // 表达式错误
 }
 
-QPair<QPoint, QPoint> FormulaEngine::parseRange(const QString& range) const
+QVariant FormulaEngine::getCellValue(const QString& cellRef, ReportDataModel* model)
 {
-    QStringList parts = range.split(':');
-    if (parts.size() != 2)
-        return qMakePair(QPoint(-1, -1), QPoint(-1, -1));
+    QPoint pos = parseReference(cellRef);
+    if (pos.x() == -1 || pos.y() == -1) {
+        return QVariant(0.0);
+    }
 
-    QPoint start = parseReference(parts[0]);
-    QPoint end = parseReference(parts[1]);
+    const RTCell* cell = model->getCell(pos.x(), pos.y());
+    if (!cell) {
+        return QVariant(0.0);
+    }
 
-    return qMakePair(start, end);
+    return cell->value;
+}
+
+double FormulaEngine::applyOperator(double left, double right, QChar op)
+{
+    switch (op.unicode()) {
+    case '+': return left + right;
+    case '-': return left - right;
+    case '*': return left * right;
+    case '/': return (right != 0) ? left / right : 0;
+    default: return 0;
+    }
+}
+
+int FormulaEngine::getOperatorPrecedence(QChar op)
+{
+    switch (op.unicode()) {
+    case '+': case '-': return 1;
+    case '*': case '/': return 2;
+    default: return 0;
+    }
+}
+
+bool FormulaEngine::isOperator(QChar c)
+{
+    return c == '+' || c == '-' || c == '*' || c == '/';
+}
+
+bool FormulaEngine::isValidCellReference(const QString& ref) const
+{
+    QRegularExpression regex(R"(^[A-Z]+\d+$)");
+    return regex.match(ref).hasMatch();
 }
