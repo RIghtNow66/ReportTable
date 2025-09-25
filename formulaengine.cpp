@@ -4,6 +4,10 @@
 #include <QStack>
 #include <QQueue>
 
+FormulaEngine::FormulaEngine(QObject* parent) : QObject(parent)
+{
+}
+
 QVariant FormulaEngine::evaluate(const QString& formula, ReportDataModel* model, int currentRow, int currentCol)
 {
     Q_UNUSED(currentRow)
@@ -46,6 +50,92 @@ QVariant FormulaEngine::evaluate(const QString& formula, ReportDataModel* model,
     // 如果不是函数，尝试作为表达式处理
     return evaluateExpression(expr, model);
 }
+
+bool FormulaEngine::isFormula(const QString& text) const
+{
+	return !text.isEmpty() && text.startsWith('=');
+}
+
+// 
+QVariant FormulaEngine::evaluateSum(const QString& range, ReportDataModel* model)
+{
+    QPair<QPoint, QPoint> cellRange = parseRange(range);
+    if (cellRange.first.x() == -1 || cellRange.second.x() == -1) {
+        return QVariant(0.0);
+    }
+
+    double sum = 0.0;
+    for (int row = cellRange.first.x(); row <= cellRange.second.x(); ++row) {
+        for (int col = cellRange.first.y(); col <= cellRange.second.y(); ++col) {
+            const RTCell* cell = model->getCell(row, col);
+            if (cell) {
+                bool ok;
+                double value = cell->value.toDouble(&ok);
+                if (ok) {
+                    sum += value;
+                }
+            }
+        }
+    }
+    return QVariant(sum);
+}
+
+QVariant FormulaEngine::evaluateMax(const QString& range, ReportDataModel* model)
+{
+    QPair<QPoint, QPoint> cellRange = parseRange(range);
+    if (cellRange.first.x() == -1 || cellRange.second.x() == -1) {
+        return QVariant();
+    }
+
+    double maxValue = std::numeric_limits<double>::lowest();
+    bool hasValue = false;
+
+    for (int row = cellRange.first.x(); row <= cellRange.second.x(); ++row) {
+        for (int col = cellRange.first.y(); col <= cellRange.second.y(); ++col) {
+            const RTCell* cell = model->getCell(row, col);
+            if (cell) {
+                bool ok;
+                double value = cell->value.toDouble(&ok);
+                if (ok) {
+                    if (!hasValue || value > maxValue) {
+                        maxValue = value;
+                        hasValue = true;
+                    }
+                }
+            }
+        }
+    }
+    return hasValue ? QVariant(maxValue) : QVariant(0.0);
+}
+
+QVariant FormulaEngine::evaluateMin(const QString& range, ReportDataModel* model)
+{
+    QPair<QPoint, QPoint> cellRange = parseRange(range);
+    if (cellRange.first.x() == -1 || cellRange.second.x() == -1) {
+        return QVariant();
+    }
+
+    double minValue = std::numeric_limits<double>::max();
+    bool hasValue = false;
+
+    for (int row = cellRange.first.x(); row <= cellRange.second.x(); ++row) {
+        for (int col = cellRange.first.y(); col <= cellRange.second.y(); ++col) {
+            const RTCell* cell = model->getCell(row, col);
+            if (cell) {
+                bool ok;
+                double value = cell->value.toDouble(&ok);
+                if (ok) {
+                    if (!hasValue || value < minValue) {
+                        minValue = value;
+                        hasValue = true;
+                    }
+                }
+            }
+        }
+    }
+    return hasValue ? QVariant(minValue) : QVariant(0.0);
+}
+
 
 QVariant FormulaEngine::evaluateExpression(const QString& expression, ReportDataModel* model)
 {
@@ -196,8 +286,59 @@ bool FormulaEngine::isOperator(QChar c)
     return c == '+' || c == '-' || c == '*' || c == '/';
 }
 
+QPoint FormulaEngine::parseReference(const QString& ref) const
+{
+    if (!isValidCellReference(ref)) {
+        return QPoint(-1, -1);
+    }
+
+    // 分离字母和数字部分
+    QRegularExpression regex(R"(([A-Z]+)(\d+))");
+    QRegularExpressionMatch match = regex.match(ref);
+
+    if (!match.hasMatch()) {
+        return QPoint(-1, -1);
+    }
+
+    QString colStr = match.captured(1);
+    int rowNum = match.captured(2).toInt();
+
+    // 转换列名为列索引
+    int col = 0;
+    for (int i = 0; i < colStr.length(); ++i) {
+        col = col * 26 + (colStr[i].unicode() - 'A' + 1);
+    }
+    col -= 1; // 转换为0基索引
+
+    return QPoint(rowNum - 1, col); // 转换为0基索引
+}
+
+// 解析范围字符串，如 "A1:B3"
+QPair<QPoint, QPoint> FormulaEngine::parseRange(const QString& range) const
+{
+    QStringList parts = range.split(':');
+    if (parts.size() != 2) {
+        return qMakePair(QPoint(-1, -1), QPoint(-1, -1));
+    }
+
+    QPoint start = parseReference(parts[0].trimmed());
+    QPoint end = parseReference(parts[1].trimmed());
+
+    return qMakePair(start, end);
+}
+
 bool FormulaEngine::isValidCellReference(const QString& ref) const
 {
     QRegularExpression regex(R"(^[A-Z]+\d+$)");
     return regex.match(ref).hasMatch();
+}
+
+QString FormulaEngine::columnToString(int col) const
+{
+    QString result;
+    while (col >= 0) {
+        result.prepend(QChar('A' + (col % 26)));
+        col = col / 26 - 1;
+    }
+    return result;
 }

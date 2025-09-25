@@ -25,7 +25,6 @@ Makefile
 tmp
 
 # QXlsx 整个目录（不上传）
-QXlsx/
 .vs/
 release/
 debug/
