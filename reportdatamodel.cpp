@@ -415,9 +415,16 @@ bool ReportDataModel::removeColumns(int column, int count, const QModelIndex& pa
 
 bool ReportDataModel::loadFromExcel(const QString& fileName)
 {
-    // begin/endResetModel必须在模型内部调用，因为它们是受保护的
+    // --- 核心修改：在加载前，彻底重置模型 ---
     beginResetModel();
-    // 委托给ExcelHandler处理真正的文件读写逻辑
+    clearAllCells(); // 这会清空 m_cells 和尺寸向量
+    m_maxRow = 100;    // 恢复默认行数
+    m_maxCol = 26;     // 恢复默认列数
+    endResetModel();
+    // ------------------------------------
+
+    // 重新发出 beginResetModel 信号，为加载新数据做准备
+    beginResetModel();
     bool result = ExcelHandler::loadFromFile(fileName, this);
     endResetModel();
 

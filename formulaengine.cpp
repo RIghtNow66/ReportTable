@@ -207,7 +207,7 @@ QVariant FormulaEngine::calculateArithmetic(const QString& expression)
         else if (c == ')') {
             while (!operators.isEmpty() && operators.top() != '(') {
                 QChar op = operators.pop();
-                if (numbers.size() < 2) return QVariant(); // 错误
+                if (numbers.size() < 2) return QVariant("#ERROR!"); // 错误
                 double right = numbers.pop();
                 double left = numbers.pop();
                 numbers.push(applyOperator(left, right, op));
@@ -219,7 +219,7 @@ QVariant FormulaEngine::calculateArithmetic(const QString& expression)
                 operators.top() != '(' &&
                 getOperatorPrecedence(operators.top()) >= getOperatorPrecedence(c)) {
                 QChar op = operators.pop();
-                if (numbers.size() < 2) return QVariant(); // 错误
+                if (numbers.size() < 2) return QVariant("#ERROR!"); // 错误
                 double right = numbers.pop();
                 double left = numbers.pop();
                 numbers.push(applyOperator(left, right, op));
@@ -233,7 +233,7 @@ QVariant FormulaEngine::calculateArithmetic(const QString& expression)
     // 处理剩余的操作符
     while (!operators.isEmpty()) {
         QChar op = operators.pop();
-        if (numbers.size() < 2) return QVariant(); // 错误
+        if (numbers.size() < 2) return QVariant("#ERROR!"); // 错误
         double right = numbers.pop();
         double left = numbers.pop();
         numbers.push(applyOperator(left, right, op));
@@ -243,7 +243,7 @@ QVariant FormulaEngine::calculateArithmetic(const QString& expression)
         return numbers.top();
     }
 
-    return QVariant(); // 表达式错误
+    return QVariant("#ERROR!"); // 表达式错误
 }
 
 QVariant FormulaEngine::getCellValue(const QString& cellRef, ReportDataModel* model)

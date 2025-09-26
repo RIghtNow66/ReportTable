@@ -173,18 +173,22 @@ void ExcelHandler::loadRowColumnSizes(QXlsx::Worksheet* worksheet, ReportDataMod
 
     const QXlsx::CellRange dimension = worksheet->dimension();
 
-    // 读取列宽 (QXlsx的单位是字符数，需要转换为像素)
-    // Excel一个标准字符宽度大约是7-8像素，这里我们用一个经验值7.5
-    const double characterWidthToPixelRatio = 7.5;
+    // 列宽：Excel 到像素的近似转换
+    // 推荐用 7 (Excel 列宽 1 ≈ 7px)，而不是固定 64/8.43
+    auto colWidthToPixel = [](double excelWidth) {
+        if (excelWidth <= 0) return 0.0;
+        return std::floor((excelWidth + 0.72) * 7);  // 经验公式，微软官方文档的近似
+        };
+
     for (int col = dimension.firstColumn(); col <= dimension.lastColumn(); ++col) {
         double width = worksheet->columnWidth(col);
         if (width > 0) {
-            model->setColumnWidth(col - 1, width * characterWidthToPixelRatio);
+            model->setColumnWidth(col - 1, colWidthToPixel(width));
         }
     }
 
-    // 读取行高 (QXlsx的单位是磅，1磅大约是1.33像素)
-    const double pointToPixelRatio = 1.33;
+    // 行高：point -> pixel
+    const double pointToPixelRatio = 96.0 / 72.0;
     for (int row = dimension.firstRow(); row <= dimension.lastRow(); ++row) {
         double height = worksheet->rowHeight(row);
         if (height > 0) {
@@ -255,7 +259,7 @@ bool ExcelHandler::saveToFile(const QString& fileName, ReportDataModel* model)
         }
     }
     const auto& colWidths = model->getAllColumnWidths();
-    const double pixelToCharacterWidthRatio = 0.13; // 像素转字符数
+    const double pixelToCharacterWidthRatio = 0.5; // 像素转字符数
     for (int i = 0; i < colWidths.size(); ++i) {
         if (colWidths[i] > 0) {
             //   ↓↓↓  将原来的调用修改为这一行  ↓↓↓

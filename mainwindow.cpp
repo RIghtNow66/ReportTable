@@ -186,12 +186,13 @@ void MainWindow::onImportExcel()
         "导入Excel文件", "", "Excel文件 (*.xlsx *.xls)");
 
     if (!fileName.isEmpty()) {
+        // --- 核心修改：在加载模型数据前，先清除视图的旧状态 ---
+        m_tableView->clearSpans(); // 清除旧的合并单元格信息
+        // ------------------------------------------------
+
         if (m_dataModel->loadFromExcel(fileName)) {
-            // 设置合并单元格
             updateTableSpans();
-
             applyRowColumnSizes();
-
             QMessageBox::information(this, "成功", "文件导入成功！");
         }
         else {
