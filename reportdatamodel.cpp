@@ -6,6 +6,8 @@
 #include <QFont>
 #include <QPoint>
 #include <QHash>
+#include <QBrush>
+#include <QPen>
 
 // --- 构造与析构 ---
 
@@ -36,6 +38,23 @@ int ReportDataModel::columnCount(const QModelIndex& parent) const
         return m_maxCol;
 }
 
+QSize ReportDataModel::span(const QModelIndex& index) const
+{
+    if (!index.isValid())
+        return QSize(1, 1);
+
+    const RTCell* cell = getCell(index.row(), index.column());
+    if (!cell || !cell->mergedRange.isValid() || !cell->mergedRange.isMerged())
+        return QSize(1, 1);
+
+    // 只有主单元格返回span信息
+    if (index.row() == cell->mergedRange.startRow &&
+        index.column() == cell->mergedRange.startCol) {
+        return QSize(cell->mergedRange.colSpan(), cell->mergedRange.rowSpan());
+    }
+
+    return QSize(1, 1);
+}
 QVariant ReportDataModel::data(const QModelIndex& index, int role) const
 {
     if (!index.isValid())
@@ -43,8 +62,31 @@ QVariant ReportDataModel::data(const QModelIndex& index, int role) const
 
     const RTCell* cell = getCell(index.row(), index.column());
     if (!cell)
-        return QVariant(); // 对于没有数据的单元格，返回空
+        return QVariant();
 
+    // 对于合并单元格，除了主单元格，其他单元格只显示样式，不显示内容
+    if (cell->mergedRange.isValid() && cell->mergedRange.isMerged()) {
+        bool isMainCell = (index.row() == cell->mergedRange.startRow &&
+            index.column() == cell->mergedRange.startCol);
+
+        switch (role) {
+        case Qt::DisplayRole:
+        case Qt::EditRole:
+            return isMainCell ? cell->value.toString() : QVariant();
+        case Qt::BackgroundRole:
+            return cell->style.backgroundColor;
+        case Qt::ForegroundRole:
+            return cell->style.textColor;
+        case Qt::FontRole:
+            return cell->style.font;
+        case Qt::TextAlignmentRole:
+            return static_cast<int>(cell->style.alignment);
+        default:
+            return QVariant();
+        }
+    }
+
+    // 普通单元格的处理
     switch (role) {
     case Qt::DisplayRole:
         return cell->displayText();
@@ -97,9 +139,18 @@ Qt::ItemFlags ReportDataModel::flags(const QModelIndex& index) const
     if (!index.isValid())
         return Qt::NoItemFlags;
 
+    // 检查是否是合并单元格的从属单元格
+    const RTCell* cell = getCell(index.row(), index.column());
+    if (cell && cell->mergedRange.isValid() && cell->mergedRange.isMerged()) {
+        // 如果不是主单元格，则不可编辑
+        if (!(index.row() == cell->mergedRange.startRow &&
+            index.column() == cell->mergedRange.startCol)) {
+            return Qt::ItemIsEnabled | Qt::ItemIsSelectable;
+        }
+    }
+
     return Qt::ItemIsEnabled | Qt::ItemIsSelectable | Qt::ItemIsEditable;
 }
-
 QVariant ReportDataModel::headerData(int section, Qt::Orientation orientation, int role) const
 {
     if (role != Qt::DisplayRole)
@@ -131,13 +182,29 @@ bool ReportDataModel::insertRows(int row, int count, const QModelIndex& parent)
     QHash<QPoint, RTCell*> newCells;
     for (auto it = m_cells.begin(); it != m_cells.end(); ++it) {
         QPoint oldPos = it.key();
+        RTCell* cell = it.value();
+
         if (oldPos.x() >= row) {
             // 将此行及以下的单元格向下移动
             QPoint newPos(oldPos.x() + count, oldPos.y());
-            newCells[newPos] = it.value();
+            newCells[newPos] = cell;
+
+            // 更新合并单元格信息
+            if (cell->mergedRange.isValid()) {
+                if (cell->mergedRange.startRow >= row) {
+                    cell->mergedRange.startRow += count;
+                    cell->mergedRange.endRow += count;
+                }
+            }
         }
         else {
-            newCells[oldPos] = it.value();
+            newCells[oldPos] = cell;
+
+            // 更新跨越插入行的合并单元格信息
+            if (cell->mergedRange.isValid() &&
+                cell->mergedRange.startRow < row && cell->mergedRange.endRow >= row) {
+                cell->mergedRange.endRow += count;
+            }
         }
     }
     m_cells = newCells;
@@ -158,17 +225,43 @@ bool ReportDataModel::removeRows(int row, int count, const QModelIndex& parent)
     QHash<QPoint, RTCell*> newCells;
     for (auto it = m_cells.begin(); it != m_cells.end(); ++it) {
         QPoint oldPos = it.key();
+        RTCell* cell = it.value();
+
         if (oldPos.x() >= row && oldPos.x() < row + count) {
             // 删除被移除范围内的单元格
-            delete it.value();
+            delete cell;
         }
         else if (oldPos.x() >= row + count) {
             // 将被移除范围下方的单元格向上移动
             QPoint newPos(oldPos.x() - count, oldPos.y());
-            newCells[newPos] = it.value();
+            newCells[newPos] = cell;
+
+            // 更新合并单元格信息
+            if (cell->mergedRange.isValid()) {
+                if (cell->mergedRange.startRow >= row + count) {
+                    cell->mergedRange.startRow -= count;
+                    cell->mergedRange.endRow -= count;
+                }
+            }
         }
         else {
-            newCells[oldPos] = it.value();
+            newCells[oldPos] = cell;
+
+            // 更新跨越删除行的合并单元格信息
+            if (cell->mergedRange.isValid()) {
+                if (cell->mergedRange.endRow >= row + count) {
+                    cell->mergedRange.endRow -= count;
+                }
+                else if (cell->mergedRange.endRow >= row) {
+                    cell->mergedRange.endRow = row - 1;
+                }
+
+                // 如果合并范围无效了，清除合并信息
+                if (cell->mergedRange.endRow < cell->mergedRange.startRow ||
+                    cell->mergedRange.endCol < cell->mergedRange.startCol) {
+                    cell->mergedRange = RTMergedRange();
+                }
+            }
         }
     }
     m_cells = newCells;
@@ -188,12 +281,28 @@ bool ReportDataModel::insertColumns(int column, int count, const QModelIndex& pa
     QHash<QPoint, RTCell*> newCells;
     for (auto it = m_cells.begin(); it != m_cells.end(); ++it) {
         QPoint oldPos = it.key();
+        RTCell* cell = it.value();
+
         if (oldPos.y() >= column) {
             QPoint newPos(oldPos.x(), oldPos.y() + count);
-            newCells[newPos] = it.value();
+            newCells[newPos] = cell;
+
+            // 更新合并单元格信息
+            if (cell->mergedRange.isValid()) {
+                if (cell->mergedRange.startCol >= column) {
+                    cell->mergedRange.startCol += count;
+                    cell->mergedRange.endCol += count;
+                }
+            }
         }
         else {
-            newCells[oldPos] = it.value();
+            newCells[oldPos] = cell;
+
+            // 更新跨越插入列的合并单元格信息
+            if (cell->mergedRange.isValid() &&
+                cell->mergedRange.startCol < column && cell->mergedRange.endCol >= column) {
+                cell->mergedRange.endCol += count;
+            }
         }
     }
     m_cells = newCells;
@@ -214,15 +323,41 @@ bool ReportDataModel::removeColumns(int column, int count, const QModelIndex& pa
     QHash<QPoint, RTCell*> newCells;
     for (auto it = m_cells.begin(); it != m_cells.end(); ++it) {
         QPoint oldPos = it.key();
+        RTCell* cell = it.value();
+
         if (oldPos.y() >= column && oldPos.y() < column + count) {
-            delete it.value();
+            delete cell;
         }
         else if (oldPos.y() >= column + count) {
             QPoint newPos(oldPos.x(), oldPos.y() - count);
-            newCells[newPos] = it.value();
+            newCells[newPos] = cell;
+
+            // 更新合并单元格信息
+            if (cell->mergedRange.isValid()) {
+                if (cell->mergedRange.startCol >= column + count) {
+                    cell->mergedRange.startCol -= count;
+                    cell->mergedRange.endCol -= count;
+                }
+            }
         }
         else {
-            newCells[oldPos] = it.value();
+            newCells[oldPos] = cell;
+
+            // 更新跨越删除列的合并单元格信息
+            if (cell->mergedRange.isValid()) {
+                if (cell->mergedRange.endCol >= column + count) {
+                    cell->mergedRange.endCol -= count;
+                }
+                else if (cell->mergedRange.endCol >= column) {
+                    cell->mergedRange.endCol = column - 1;
+                }
+
+                // 如果合并范围无效了，清除合并信息
+                if (cell->mergedRange.endRow < cell->mergedRange.startRow ||
+                    cell->mergedRange.endCol < cell->mergedRange.startCol) {
+                    cell->mergedRange = RTMergedRange();
+                }
+            }
         }
     }
     m_cells = newCells;
@@ -344,4 +479,5 @@ RTCell* ReportDataModel::ensureCell(int row, int col)
     }
     return m_cells[key];
 }
+
 

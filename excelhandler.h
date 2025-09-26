@@ -2,15 +2,20 @@
 #define EXCELHANDLER_H
 
 #include <QString>
+#include <QHash>
+#include <QPoint>
 
-struct RTCell;
-struct RTCellStyle; 
-struct RTMergedRange;
+#include "xlsxformat.h"
+
+// 前向声明所有需要的类型
 class ReportDataModel;
-class QXlsx;
+struct RTCell;
+struct RTCellStyle;
+struct RTCellBorder;      // 添加这个声明
+struct RTMergedRange;
+enum class RTBorderStyle; // 添加这个声明
 
 namespace QXlsx {
-    class Format;
     class Worksheet;
 }
 
@@ -30,7 +35,9 @@ private:
     static void saveMergedCells(QXlsx::Worksheet* worksheet, const QHash<QPoint, RTCell*>& allCells);
     static void convertBorderFromExcel(const QXlsx::Format& excelFormat, RTCellBorder& border);
     static void convertBorderToExcel(const RTCellBorder& border, QXlsx::Format& excelFormat);
-    RTBorderStyle convertBorderStyleFromExcel(QXlsx::Format::BorderStyle xlsxStyle);
-    QXlsx::Format::BorderStyle convertBorderStyleToExcel(RTBorderStyle rtStyle);
+    static RTBorderStyle convertBorderStyleFromExcel(QXlsx::Format::BorderStyle xlsxStyle);
+    static QXlsx::Format::BorderStyle convertBorderStyleToExcel(RTBorderStyle rtStyle);
+
+    void loadRowColumnSizes(QXlsx::Worksheet* worksheet, ReportDataModel* model);
 };
 #endif // EXCELHANDLER_H

@@ -1,23 +1,28 @@
 ﻿#pragma execution_character_set("utf-8")
 
-
 #include "mainwindow.h"
 #include "reportdatamodel.h"
+#include "EnhancedTableView.h"
 #include <QApplication>
 #include <QFileDialog>
 #include <QMessageBox>
 #include <QHeaderView>
+#include <QLineEdit>
+#include <QInputDialog>
+#include <QSortFilterProxyModel>
 
 MainWindow::MainWindow(QWidget* parent)
     : QMainWindow(parent)
     , m_updating(false)
 	, m_formulaEditMode(false)
+    , m_filterModel(nullptr)
 {
     setupUI();
     setupToolBar();
     setupFormulaBar();
     setupTableView();
     setupContextMenu();
+    setupFindDialog();
 
     setWindowTitle("SCADA报表控件 v1.0");
     resize(1200, 800);
@@ -45,22 +50,15 @@ void MainWindow::setupToolBar()
     m_toolBar->addAction("导入", this, &MainWindow::onImportExcel);
     m_toolBar->addAction("导出", this, &MainWindow::onExportExcel);
     m_toolBar->addSeparator();
-
-    // 编辑操作
-    m_toolBar->addAction("撤销", this, &MainWindow::onUndo);
-    m_toolBar->addAction("重做", this, &MainWindow::onRedo);
     m_toolBar->addSeparator();
 
     // 工具操作
     m_toolBar->addAction("查找", this, &MainWindow::onFind);
     m_toolBar->addAction("筛选", this, &MainWindow::onFilter);
-    m_toolBar->addAction("排序", this, &MainWindow::onSort);
     m_toolBar->addSeparator();
 
-    // 格式操作
-    m_toolBar->addAction("边框", this, &MainWindow::onBorderFormat);
-    m_toolBar->addAction("字体", this, &MainWindow::onFontSetting);
-    m_toolBar->addAction("背景", this, &MainWindow::onBackgroundSetting);
+    // 清楚筛选
+    m_toolBar->addAction("清除筛选", this, &MainWindow::onClearFilter);
 }
 
 void MainWindow::setupFormulaBar()
@@ -89,7 +87,7 @@ void MainWindow::setupFormulaBar()
 
 void MainWindow::setupTableView()
 {
-    m_tableView = new QTableView();
+    m_tableView = new EnhancedTableView();
     m_dataModel = new ReportDataModel(this);
 
     m_tableView->setModel(m_dataModel);
@@ -127,6 +125,61 @@ void MainWindow::setupContextMenu()
     m_contextMenu->addAction("删除列", this, &MainWindow::onDeleteColumn);
 }
 
+void MainWindow::setupFindDialog()
+{
+    m_findDialog = new QDialog(this);
+    m_findDialog->setWindowTitle("查找");
+    m_findDialog->setModal(false);
+    m_findDialog->resize(300, 120);
+
+    QVBoxLayout* layout = new QVBoxLayout(m_findDialog);
+
+    QHBoxLayout* inputLayout = new QHBoxLayout();
+    inputLayout->addWidget(new QLabel("查找内容:"));
+    m_findLineEdit = new QLineEdit();
+    inputLayout->addWidget(m_findLineEdit);
+    layout->addLayout(inputLayout);
+
+    QHBoxLayout* buttonLayout = new QHBoxLayout();
+    QPushButton* findNextBtn = new QPushButton("查找下一个");
+    QPushButton* closeBtn = new QPushButton("关闭");
+    buttonLayout->addWidget(findNextBtn);
+    buttonLayout->addWidget(closeBtn);
+    layout->addLayout(buttonLayout);
+
+    connect(findNextBtn, &QPushButton::clicked, this, &MainWindow::onFindNext);
+    connect(closeBtn, &QPushButton::clicked, m_findDialog, &QDialog::hide);
+    connect(m_findLineEdit, &QLineEdit::returnPressed, this, &MainWindow::onFindNext);
+}
+
+void MainWindow::updateTableSpans()
+{
+    const auto& allCells = m_dataModel->getAllCells();
+
+    // 清除现有的span设置
+    // QTableView没有直接的clearAllSpans方法，需要重置
+
+    // 设置新的span
+    for (auto it = allCells.constBegin(); it != allCells.constEnd(); ++it) {
+        const QPoint& pos = it.key();
+        const RTCell* cell = it.value();
+
+        if (cell && cell->mergedRange.isValid() && cell->mergedRange.isMerged()) {
+            // 只为主单元格设置span
+            if (pos.x() == cell->mergedRange.startRow &&
+                pos.y() == cell->mergedRange.startCol) {
+
+                int rowSpan = cell->mergedRange.rowSpan();
+                int colSpan = cell->mergedRange.colSpan();
+
+                if (rowSpan > 1 || colSpan > 1) {
+                    m_tableView->setSpan(pos.x(), pos.y(), rowSpan, colSpan);
+                }
+            }
+        }
+    }
+}
+
 void MainWindow::onImportExcel()
 {
     QString fileName = QFileDialog::getOpenFileName(this,
@@ -134,6 +187,9 @@ void MainWindow::onImportExcel()
 
     if (!fileName.isEmpty()) {
         if (m_dataModel->loadFromExcel(fileName)) {
+            // 设置合并单元格
+            updateTableSpans();
+
             QMessageBox::information(this, "成功", "文件导入成功！");
         }
         else {
@@ -156,6 +212,105 @@ void MainWindow::onExportExcel()
         }
     }
 }
+
+void MainWindow::onFind()
+{
+    if (m_findDialog->isVisible()) {
+        m_findDialog->raise();
+        m_findDialog->activateWindow();
+    }
+    else {
+        m_findDialog->show();
+    }
+    m_findLineEdit->setFocus();
+    m_findLineEdit->selectAll();
+}
+
+void MainWindow::onFindNext()
+{
+    QString searchText = m_findLineEdit->text();
+    if (searchText.isEmpty()) {
+        return;
+    }
+
+    // 从当前位置开始查找
+    QModelIndex startIndex = m_currentIndex.isValid() ? m_currentIndex : m_dataModel->index(0, 0);
+    int startRow = startIndex.row();
+    int startCol = startIndex.column();
+
+    // 从下一个单元格开始搜索
+    bool found = false;
+    for (int row = startRow; row < m_dataModel->rowCount() && !found; ++row) {
+        int beginCol = (row == startRow) ? startCol + 1 : 0;
+        for (int col = beginCol; col < m_dataModel->columnCount() && !found; ++col) {
+            QModelIndex index = m_dataModel->index(row, col);
+            QString cellText = m_dataModel->data(index, Qt::DisplayRole).toString();
+
+            if (cellText.contains(searchText, Qt::CaseInsensitive)) {
+                m_tableView->setCurrentIndex(index);
+                m_tableView->scrollTo(index);
+                found = true;
+            }
+        }
+    }
+
+    if (!found) {
+        // 从头开始搜索到当前位置
+        for (int row = 0; row <= startRow && !found; ++row) {
+            int endCol = (row == startRow) ? startCol : m_dataModel->columnCount() - 1;
+            for (int col = 0; col <= endCol && !found; ++col) {
+                QModelIndex index = m_dataModel->index(row, col);
+                QString cellText = m_dataModel->data(index, Qt::DisplayRole).toString();
+
+                if (cellText.contains(searchText, Qt::CaseInsensitive)) {
+                    m_tableView->setCurrentIndex(index);
+                    m_tableView->scrollTo(index);
+                    found = true;
+                }
+            }
+        }
+    }
+
+    if (!found) {
+        QMessageBox::information(this, "查找", "未找到匹配的内容");
+    }
+}
+
+void MainWindow::onFilter()
+{
+    bool ok;
+    QString filterText = QInputDialog::getText(this, "筛选",
+        "请输入筛选条件（支持通配符*和?）:", QLineEdit::Normal, "", &ok);
+
+    if (ok && !filterText.isEmpty()) {
+        if (!m_filterModel) {
+            m_filterModel = new QSortFilterProxyModel(this);
+            m_filterModel->setSourceModel(m_dataModel);
+            m_filterModel->setFilterKeyColumn(-1); // 搜索所有列
+            m_tableView->setModel(m_filterModel);
+        }
+
+        // 转换通配符为正则表达式
+        QString regexPattern = QRegularExpression::escape(filterText);
+        regexPattern.replace("\\*", ".*");
+        regexPattern.replace("\\?", ".");
+
+        m_filterModel->setFilterRegularExpression(QRegularExpression(regexPattern, QRegularExpression::CaseInsensitiveOption));
+
+        //statusBar()->showMessage(QString("筛选结果：%1 行").arg(m_filterModel->rowCount()), 3000);
+    }
+}
+
+void MainWindow::onClearFilter()
+{
+    if (m_filterModel) {
+        m_tableView->setModel(m_dataModel);
+        delete m_filterModel;
+        m_filterModel = nullptr;
+        //statusBar()->showMessage("已清除筛选", 2000);
+    }
+}
+
 
 void MainWindow::onCurrentCellChanged(const QModelIndex& current, const QModelIndex& previous)
 {

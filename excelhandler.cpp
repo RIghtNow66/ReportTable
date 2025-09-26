@@ -8,6 +8,8 @@
 #include <QProgressDialog>
 #include <memory> // for std::make_unique
 #include <QSet>
+#include <QTextCodec>
+#include <qDebug>
 
 // 明确包含所有需要的QXlsx库头文件
 #include "xlsxdocument.h"
@@ -109,8 +111,79 @@ bool ExcelHandler::loadFromFile(const QString& fileName, ReportDataModel* model)
     }
 
     model->updateModelSize(maxModelRow, maxModelCol);
+
+    // 处理合并单元格的样式统一 - 只处理每个合并区域一次
+    QSet<QPair<QPair<int, int>, QPair<int, int>>> processedMergedRanges;
+
+    for (auto it = mergedRanges.constBegin(); it != mergedRanges.constEnd(); ++it) {
+        const RTMergedRange& mergedRange = it.value();
+
+        // 创建合并范围的唯一标识符
+        QPair<QPair<int, int>, QPair<int, int>> rangeKey = {
+            {mergedRange.startRow, mergedRange.startCol},
+            {mergedRange.endRow, mergedRange.endCol}
+        };
+
+        // 如果这个合并区域已经处理过，跳过
+        if (processedMergedRanges.contains(rangeKey)) {
+            continue;
+        }
+
+        processedMergedRanges.insert(rangeKey);
+
+        // 获取主单元格（左上角）
+        RTCell* mainCell = model->getCell(mergedRange.startRow, mergedRange.startCol);
+        if (!mainCell) {
+            // 如果主单元格不存在，创建一个
+            mainCell = model->ensureCell(mergedRange.startRow, mergedRange.startCol);
+            mainCell->mergedRange = mergedRange;
+        }
+
+        // 将主单元格的样式复制到合并区域内的所有单元格
+        for (int row = mergedRange.startRow; row <= mergedRange.endRow; ++row) {
+            for (int col = mergedRange.startCol; col <= mergedRange.endCol; ++col) {
+                RTCell* cell = model->ensureCell(row, col);
+                if (cell) {
+                    // 设置合并信息
+                    cell->mergedRange = mergedRange;
+
+                    // 如果不是主单元格，清空内容但保持样式
+                    if (row != mergedRange.startRow || col != mergedRange.startCol) {
+                        cell->value = QVariant();
+                        cell->formula.clear();
+                        cell->hasFormula = false;
+                    }
+
+                    // 应用主单元格的样式到所有单元格
+                    cell->style = mainCell->style;
+                }
+            }
+        }
+    }
+
     progress->setValue(100);
     return true;
+}
+
+void ExcelHandler::loadRowColumnSizes(QXlsx::Worksheet* worksheet, ReportDataModel* model)
+{
+    // 读取列宽
+    for (int col = 1; col <= worksheet->dimension().lastColumn(); ++col) {
+        double width = worksheet->columnWidth(col);
+        if (width > 0) {
+            // 转换为像素并存储到模型中
+            // 注意：QXlsx的宽度单位可能需要转换
+            qDebug() << "Column" << col << "width:" << width;
+        }
+    }
+
+    // 读取行高
+    for (int row = 1; row <= worksheet->dimension().lastRow(); ++row) {
+        double height = worksheet->rowHeight(row);
+        if (height > 0) {
+            qDebug() << "Row" << row << "height:" << height;
+        }
+    }
 }
 
 bool ExcelHandler::saveToFile(const QString& fileName, ReportDataModel* model)
@@ -230,12 +303,43 @@ void ExcelHandler::saveMergedCells(QXlsx::Worksheet* worksheet, const QHash<QPoi
 
 void ExcelHandler::convertFromExcelStyle(const QXlsx::Format& excelFormat, RTCellStyle& cellStyle)
 {
-    // 字体
-    cellStyle.font = excelFormat.font();
+    // 调试背景色读取
+    qDebug() << "=== Background Color Debug ===";
+    qDebug() << "Pattern background:" << excelFormat.patternBackgroundColor();
+    qDebug() << "Pattern foreground:" << excelFormat.patternForegroundColor();
+    qDebug() << "Fill pattern:" << excelFormat.fillPattern();
 
-    // 颜色
-    cellStyle.backgroundColor = excelFormat.patternBackgroundColor();
+    // 尝试多种方式获取背景色
+    QColor bgColor = excelFormat.patternBackgroundColor();
+    if (!bgColor.isValid() || bgColor == QColor()) {
+        bgColor = excelFormat.patternForegroundColor();
+        qDebug() << "Using foreground as background";
+    }
+    if (!bgColor.isValid() || bgColor == QColor()) {
+        bgColor = Qt::white;
+        qDebug() << "Using default white";
+    }
+
+    // 检查是否是QXlsx读取中文字体的错误情况
+    if (cellStyle.font.family() == "Calibri" && excelFormat.fontSize() == 0) {
+        // 这很可能是中文字体被错误读取的情况
+        cellStyle.font.setFamily("SimSun");  // 宋体的英文名
+        cellStyle.font.setPointSize(11);      // 设置合理的默认字号
+    }
+    else {
+        // 正常的英文字体，保持原有逻辑
+        int fontSize = excelFormat.fontSize();
+        if (fontSize > 0) {
+            cellStyle.font.setPointSize(fontSize);
+        }
+        else if (cellStyle.font.pointSize() <= 0) {
+            cellStyle.font.setPointSize(10); // 默认字号
+        }
+    }
+
+    cellStyle.backgroundColor = bgColor;
     cellStyle.textColor = excelFormat.fontColor();
+
 
     // 对齐方式
     Qt::Alignment hAlign = Qt::AlignLeft;
@@ -252,7 +356,7 @@ void ExcelHandler::convertFromExcelStyle(const QXlsx::Format& excelFormat, RTCel
     }
     cellStyle.alignment = hAlign | vAlign;
 
-    // 边框
+    // 边框 - 现在可以正常处理了
     convertBorderFromExcel(excelFormat, cellStyle.border);
 }
 
@@ -280,7 +384,7 @@ QXlsx::Format ExcelHandler::convertToExcelFormat(const RTCellStyle& cellStyle)
     else
         excelFormat.setVerticalAlignment(QXlsx::Format::AlignVCenter);
 
-    // 边框
+    // 边框 - 现在可以正常处理了
     convertBorderToExcel(cellStyle.border, excelFormat);
 
     return excelFormat;
@@ -288,43 +392,54 @@ QXlsx::Format ExcelHandler::convertToExcelFormat(const RTCellStyle& cellStyle)
 
 void ExcelHandler::convertBorderFromExcel(const QXlsx::Format& excelFormat, RTCellBorder& border)
 {
-    // 转换边框样式
-    border.left = convertBorderStyleFromExcel(excelFormat.borderStyle(QXlsx::Format::BorderLeft));
-    border.right = convertBorderStyleFromExcel(excelFormat.borderStyle(QXlsx::Format::BorderRight));
-    border.top = convertBorderStyleFromExcel(excelFormat.borderStyle(QXlsx::Format::BorderTop));
-    border.bottom = convertBorderStyleFromExcel(excelFormat.borderStyle(QXlsx::Format::BorderBottom));
+    // 转换边框样式 - 使用正确的API
+    border.left = convertBorderStyleFromExcel(excelFormat.leftBorderStyle());
+    border.right = convertBorderStyleFromExcel(excelFormat.rightBorderStyle());
+    border.top = convertBorderStyleFromExcel(excelFormat.topBorderStyle());
+    border.bottom = convertBorderStyleFromExcel(excelFormat.bottomBorderStyle());
 
-    // 转换边框颜色
-    border.leftColor = excelFormat.borderColor(QXlsx::Format::BorderLeft);
-    border.rightColor = excelFormat.borderColor(QXlsx::Format::BorderRight);
-    border.topColor = excelFormat.borderColor(QXlsx::Format::BorderTop);
-    border.bottomColor = excelFormat.borderColor(QXlsx::Format::BorderBottom);
+    // 转换边框颜色 - 使用正确的API
+    border.leftColor = excelFormat.leftBorderColor();
+    border.rightColor = excelFormat.rightBorderColor();
+    border.topColor = excelFormat.topBorderColor();
+    border.bottomColor = excelFormat.bottomBorderColor();
 }
+
 
 void ExcelHandler::convertBorderToExcel(const RTCellBorder& border, QXlsx::Format& excelFormat)
 {
-    // 转换边框样式
-    excelFormat.setBorderStyle(QXlsx::Format::BorderLeft, convertBorderStyleToExcel(border.left));
-    excelFormat.setBorderStyle(QXlsx::Format::BorderRight, convertBorderStyleToExcel(border.right));
-    excelFormat.setBorderStyle(QXlsx::Format::BorderTop, convertBorderStyleToExcel(border.top));
-    excelFormat.setBorderStyle(QXlsx::Format::BorderBottom, convertBorderStyleToExcel(border.bottom));
+    // 转换边框样式 - 使用正确的API
+    excelFormat.setLeftBorderStyle(convertBorderStyleToExcel(border.left));
+    excelFormat.setRightBorderStyle(convertBorderStyleToExcel(border.right));
+    excelFormat.setTopBorderStyle(convertBorderStyleToExcel(border.top));
+    excelFormat.setBottomBorderStyle(convertBorderStyleToExcel(border.bottom));
 
-    // 转换边框颜色
-    excelFormat.setBorderColor(QXlsx::Format::BorderLeft, border.leftColor);
-    excelFormat.setBorderColor(QXlsx::Format::BorderRight, border.rightColor);
-    excelFormat.setBorderColor(QXlsx::Format::BorderTop, border.topColor);
-    excelFormat.setBorderColor(QXlsx::Format::BorderBottom, border.bottomColor);
+    // 转换边框颜色 - 使用正确的API
+    excelFormat.setLeftBorderColor(border.leftColor);
+    excelFormat.setRightBorderColor(border.rightColor);
+    excelFormat.setTopBorderColor(border.topColor);
+    excelFormat.setBottomBorderColor(border.bottomColor);
 }
+
 
 RTBorderStyle ExcelHandler::convertBorderStyleFromExcel(QXlsx::Format::BorderStyle xlsxStyle)
 {
     switch (xlsxStyle) {
+    case QXlsx::Format::BorderNone: return RTBorderStyle::None;
     case QXlsx::Format::BorderThin: return RTBorderStyle::Thin;
     case QXlsx::Format::BorderMedium: return RTBorderStyle::Medium;
     case QXlsx::Format::BorderThick: return RTBorderStyle::Thick;
     case QXlsx::Format::BorderDouble: return RTBorderStyle::Double;
     case QXlsx::Format::BorderDotted: return RTBorderStyle::Dotted;
     case QXlsx::Format::BorderDashed: return RTBorderStyle::Dashed;
+        // QXlsx还有更多边框样式，可以映射到我们的样式
+    case QXlsx::Format::BorderHair: return RTBorderStyle::Thin;  // 映射为细线
+    case QXlsx::Format::BorderMediumDashed: return RTBorderStyle::Dashed;
+    case QXlsx::Format::BorderDashDot: return RTBorderStyle::Dashed;  // 映射为虚线
+    case QXlsx::Format::BorderMediumDashDot: return RTBorderStyle::Dashed;
+    case QXlsx::Format::BorderDashDotDot: return RTBorderStyle::Dashed;
+    case QXlsx::Format::BorderMediumDashDotDot: return RTBorderStyle::Dashed;
+    case QXlsx::Format::BorderSlantDashDot: return RTBorderStyle::Dashed;
     default: return RTBorderStyle::None;
     }
 }
@@ -332,6 +447,7 @@ RTBorderStyle ExcelHandler::convertBorderStyleFromExcel(QXlsx::Format::BorderSty
 QXlsx::Format::BorderStyle ExcelHandler::convertBorderStyleToExcel(RTBorderStyle rtStyle)
 {
     switch (rtStyle) {
+    case RTBorderStyle::None: return QXlsx::Format::BorderNone;
     case RTBorderStyle::Thin: return QXlsx::Format::BorderThin;
     case RTBorderStyle::Medium: return QXlsx::Format::BorderMedium;
     case RTBorderStyle::Thick: return QXlsx::Format::BorderThick;

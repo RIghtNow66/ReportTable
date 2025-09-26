@@ -61,14 +61,15 @@ struct RTMergedRange {
 
 struct RTCellStyle {
     QFont font;
-    QColor backgroundColor = Qt::white;
+    QColor backgroundColor;
     QColor textColor = Qt::black;
     Qt::Alignment alignment = Qt::AlignLeft | Qt::AlignVCenter;
-	RTBorderStyle border = RTBorderStyle::None;
+    RTCellBorder border;
 
     RTCellStyle() {
         font.setFamily("Arial");
         font.setPointSize(10);
+        backgroundColor = Qt::white;  // 明确设置白色背景
     }
 };
 

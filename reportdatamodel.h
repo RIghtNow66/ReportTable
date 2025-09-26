@@ -5,6 +5,7 @@
 #include <QHash>
 #include <QAbstractTableModel>
 #include <QPoint>
+#include <QSize>
 
 inline uint qHash(const QPoint& key, uint seed = 0) noexcept
 {
@@ -14,7 +15,6 @@ inline uint qHash(const QPoint& key, uint seed = 0) noexcept
 
 struct RTCell;
 struct RTCellStyle;
-
 class FormulaEngine;
 
 class ReportDataModel : public QAbstractTableModel
@@ -32,6 +32,10 @@ public:
     bool setData(const QModelIndex& index, const QVariant& value, int role = Qt::EditRole) override;
     Qt::ItemFlags flags(const QModelIndex& index) const override;
     QVariant headerData(int section, Qt::Orientation orientation, int role = Qt::DisplayRole) const override;
+    
+    // 支持合并单元格
+    QSize span(const QModelIndex& index) const;
+    
     bool insertRows(int row, int count, const QModelIndex& parent = QModelIndex()) override;
     bool removeRows(int row, int count, const QModelIndex& parent = QModelIndex()) override;
     bool insertColumns(int column, int count, const QModelIndex& parent = QModelIndex()) override;

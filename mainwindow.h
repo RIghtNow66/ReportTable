@@ -10,6 +10,9 @@
 #include <QHBoxLayout>
 #include <QAction>
 #include <QMenu>
+#include <QDialog>
+#include <QPushButton>
+#include <QSortFilterProxyModel>
 
 class ReportDataModel;
 
@@ -22,16 +25,15 @@ public:
     ~MainWindow();
 
 private slots:
+    // 文件操作
     void onImportExcel();
     void onExportExcel();
-    void onUndo() { /* 待实现 */ }
-    void onRedo() { /* 待实现 */ }
-    void onFind() { /* 待实现 */ }
-    void onFilter() { /* 待实现 */ }
-    void onSort() { /* 待实现 */ }
-    void onBorderFormat() { /* 待实现 */ }
-    void onFontSetting() { /* 待实现 */ }
-    void onBackgroundSetting() { /* 待实现 */ }
+
+    // 工具操作
+    void onFind();
+    void onFindNext();
+    void onFilter();
+    void onClearFilter();
 
     void onCurrentCellChanged(const QModelIndex& current, const QModelIndex& previous);
     void onFormulaEditFinished();
@@ -50,11 +52,13 @@ private:
     void setupFormulaBar();
     void setupTableView();
     void setupContextMenu();
+    void setupFindDialog();
     void updateFormulaBar(const QModelIndex& index);
 
-    void enterFormulaEditMode(); // 新增
-    void exitFormulaEditMode();  // 新增
-    bool isInFormulaEditMode() const; // 新增
+    void enterFormulaEditMode();
+    void exitFormulaEditMode();
+    bool isInFormulaEditMode() const;
+    void updateTableSpans();
 
 private:
     // UI组件
@@ -72,6 +76,11 @@ private:
     // 表格
     QTableView* m_tableView;
     ReportDataModel* m_dataModel;
+    QSortFilterProxyModel* m_filterModel;
+
+    // 查找对话框
+    QDialog* m_findDialog;
+    QLineEdit* m_findLineEdit;
 
     // 右键菜单
     QMenu* m_contextMenu;
