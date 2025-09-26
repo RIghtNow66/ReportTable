@@ -60,6 +60,8 @@ private:
     bool isInFormulaEditMode() const;
     void updateTableSpans();
 
+    void applyRowColumnSizes(); // <-- 新增这个函数声明
+
 private:
     // UI组件
     QWidget* m_centralWidget;

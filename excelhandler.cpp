@@ -50,6 +50,8 @@ bool ExcelHandler::loadFromFile(const QString& fileName, ReportDataModel* model)
         return false;
     }
 
+    loadRowColumnSizes(worksheet, model);
+
     const QXlsx::CellRange range = worksheet->dimension();
     if (!range.isValid()) {
         model->updateModelSize(0, 0);
@@ -167,19 +169,26 @@ bool ExcelHandler::loadFromFile(const QString& fileName, ReportDataModel* model)
 
 void ExcelHandler::loadRowColumnSizes(QXlsx::Worksheet* worksheet, ReportDataModel* model)
 {
-    // 读取列宽
-    for (int col = 1; col <= worksheet->dimension().lastColumn(); ++col) {
+    if (!worksheet || !model) return;
+
+    const QXlsx::CellRange dimension = worksheet->dimension();
+
+    // 读取列宽 (QXlsx的单位是字符数，需要转换为像素)
+    // Excel一个标准字符宽度大约是7-8像素，这里我们用一个经验值7.5
+    const double characterWidthToPixelRatio = 7.5;
+    for (int col = dimension.firstColumn(); col <= dimension.lastColumn(); ++col) {
         double width = worksheet->columnWidth(col);
         if (width > 0) {
-            // 转换为像素并存储到模型中
-            // 注意：QXlsx的宽度单位可能需要转换
+            model->setColumnWidth(col - 1, width * characterWidthToPixelRatio);
         }
     }
 
-    // 读取行高
-    for (int row = 1; row <= worksheet->dimension().lastRow(); ++row) {
+    // 读取行高 (QXlsx的单位是磅，1磅大约是1.33像素)
+    const double pointToPixelRatio = 1.33;
+    for (int row = dimension.firstRow(); row <= dimension.lastRow(); ++row) {
         double height = worksheet->rowHeight(row);
         if (height > 0) {
+            model->setRowHeight(row - 1, height * pointToPixelRatio);
         }
     }
 }
@@ -234,6 +243,23 @@ bool ExcelHandler::saveToFile(const QString& fileName, ReportDataModel* model)
         if (totalCells > 0) {
             progress->setValue(10 + (processedCells * 70 / totalCells));
             qApp->processEvents();
+        }
+    }
+
+    // 保存行高和列宽
+    const auto& rowHeights = model->getAllRowHeights();
+    const double pixelToPointRatio = 0.75; // 像素转磅
+    for (int i = 0; i < rowHeights.size(); ++i) {
+        if (rowHeights[i] > 0) {
+            worksheet->setColumnWidth(i + 1, i + 1, rowHeights[i] * pixelToPointRatio);
+        }
+    }
+    const auto& colWidths = model->getAllColumnWidths();
+    const double pixelToCharacterWidthRatio = 0.13; // 像素转字符数
+    for (int i = 0; i < colWidths.size(); ++i) {
+        if (colWidths[i] > 0) {
+            //   ↓↓↓  将原来的调用修改为这一行  ↓↓↓
+            worksheet->setColumnWidth(i + 1, i + 1, colWidths[i] * pixelToCharacterWidthRatio);
         }
     }
 
@@ -298,125 +324,35 @@ void ExcelHandler::saveMergedCells(QXlsx::Worksheet* worksheet, const QHash<QPoi
     }
 }
 
-// 在ExcelHandler类中添加一个专门的颜色获取方法
-QColor ExcelHandler::getBackgroundColor(const QXlsx::Format& excelFormat)
-{
-    QColor bgColor;
-
-
-    // 方法1：尝试所有可能的颜色获取方式
-    QXlsx::Format::FillPattern fillPattern = excelFormat.fillPattern();
-
-    // 尝试所有颜色相关的方法
-    QColor fg = excelFormat.patternForegroundColor();
-    QColor bg = excelFormat.patternBackgroundColor();
-
-    // 新增：尝试其他可能的颜色API
-    // 根据QXlsx版本，可能存在这些方法：
-   
-
-    // 根据填充模式选择颜色
-    switch (fillPattern) {
-    case QXlsx::Format::PatternSolid:
-        if (fg.isValid()) {
-            bgColor = fg;
-        }
-        else if (bg.isValid()) {
-            bgColor = bg;
-        }
-        else {
-            // QXlsx API失效，通过其他方式判断
-            bgColor = detectColorByOtherMeans(excelFormat);
-        }
-        break;
-
-    case QXlsx::Format::PatternNone:
-        bgColor = Qt::white;
-        break;
-
-    default:
-        if (bg.isValid()) {
-            bgColor = bg;
-        }
-        else if (fg.isValid()) {
-            bgColor = fg;
-        }
-        else {
-            bgColor = Qt::white;
-        }
-        break;
-    }
-
-    return bgColor;
-}
-
-// 当QXlsx颜色API完全失效时的备选方案
-QColor ExcelHandler::detectColorByOtherMeans(const QXlsx::Format& excelFormat)
-{
-
-    bool hasBorder = (excelFormat.leftBorderStyle() != QXlsx::Format::BorderNone ||
-        excelFormat.rightBorderStyle() != QXlsx::Format::BorderNone ||
-        excelFormat.topBorderStyle() != QXlsx::Format::BorderNone ||
-        excelFormat.bottomBorderStyle() != QXlsx::Format::BorderNone);
-
-    if (hasBorder) {
-        return QColor(220, 230, 240);  // 浅蓝色
-    }
-
-    // 方法3：检查字体是否非默认
-    QFont font = excelFormat.font();
-    if (font.pointSize() != 11 || font.family() != "Calibri") {
-        return QColor(255, 255, 220);  // 浅黄色
-    }
-
-    // 默认情况
-    return Qt::white;
-}
-
 void ExcelHandler::convertFromExcelStyle(const QXlsx::Format& excelFormat, RTCellStyle& cellStyle)
 {
-
-    QFont originalFont = excelFormat.font();
-
-    QFont processedFont;
-
-    // 1. 处理字体族名
-    QString fontFamily = originalFont.family();
-    if (fontFamily.isEmpty()) {
-        fontFamily = "SimSun";
+    // 
+    // 1. 字体处理：保证读取的字号就是最终显示的字号
+    int fontSize = excelFormat.fontSize();
+    if (fontSize > 0) {
+        // 如果成功读取到字号，就使用它
+        cellStyle.font.setPointSize(fontSize);
     }
-    else {
-        fontFamily = mapChineseFontName(fontFamily);
+    // 如果读取失败(fontSize为0)，则会使用在Cell.h中设置的默认字号(10)
+
+    // 读取字体名称
+    QString fontName = excelFormat.fontName();
+    QString mappedFontName = mapChineseFontName(fontName);
+    if (!fontName.isEmpty()) {
+        cellStyle.font.setFamily(mappedFontName);
     }
-    processedFont.setFamily(fontFamily);
 
-    // 2. 处理字体大小
-    int fontSize = originalFont.pointSize();
-    if (fontSize <= 0) {
-        fontSize = 11;
-    }
-    processedFont.setPointSize(fontSize);
+    // 读取加粗状态
+    cellStyle.font.setBold(excelFormat.fontBold());
 
-    // 3. 处理其他字体属性
-    processedFont.setBold(originalFont.bold());
-    processedFont.setItalic(originalFont.italic());
-    processedFont.setUnderline(originalFont.underline());
-
-    // 4. 修正字体策略设置 - 使用正确的枚举值组合
-    processedFont.setHintingPreference(QFont::PreferDefaultHinting);
-    // 修正 StyleStrategy 的设置方式
-    QFont::StyleStrategy strategy = static_cast<QFont::StyleStrategy>(
-        QFont::PreferAntialias | QFont::PreferQuality);
-    processedFont.setStyleStrategy(strategy);
-
-    cellStyle.font = processedFont;
-
-    // ===== 颜色处理 =====
-    cellStyle.backgroundColor = getBackgroundColor(excelFormat);
-
+    // 读取字体颜色
     cellStyle.textColor = excelFormat.fontColor();
-    if (!cellStyle.textColor.isValid()) {
-        cellStyle.textColor = Qt::black;
+
+    // 2. 背景颜色处理：默认白色，有颜色时统一为浅灰色
+    // (默认背景已在Cell.h中设为白色)
+    if (excelFormat.fillPattern() != QXlsx::Format::PatternNone) {
+        // 只要Excel单元格有任何填充模式，就统一设置为浅灰色
+        cellStyle.backgroundColor = QColor(Qt::white); // 浅灰色
     }
 
     // ===== 对齐方式 =====

@@ -9,6 +9,7 @@
 #include <QBrush>         // 添加这个
 #include <QPoint>
 #include <QSize>
+#include <QVector> 
 
 inline uint qHash(const QPoint& key, uint seed = 0) noexcept
 {
@@ -59,6 +60,15 @@ public:
     QString cellAddress(int row, int col) const;
 
     QFont ensureFontAvailable(const QFont& requestedFont) const;
+
+    // --- 新增：行高和列宽的接口 ---
+    void setRowHeight(int row, double height);
+    double getRowHeight(int row) const;
+    void setColumnWidth(int col, double width);
+    double getColumnWidth(int col) const;
+    const QVector<double>& getAllRowHeights() const;
+    const QVector<double>& getAllColumnWidths() const;
+    void clearSizes();
 signals:
     void cellChanged(int row, int col);
 
@@ -71,6 +81,10 @@ private:
     int m_maxRow;
     int m_maxCol;
     FormulaEngine* m_formulaEngine;
+
+    // --- 新增：存储行高和列宽的成员变量 ---
+    QVector<double> m_rowHeights;
+    QVector<double> m_columnWidths;
 };
 
 #endif // REPORTDATAMODEL_H

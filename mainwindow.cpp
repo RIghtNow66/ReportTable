@@ -190,6 +190,8 @@ void MainWindow::onImportExcel()
             // 设置合并单元格
             updateTableSpans();
 
+            applyRowColumnSizes();
+
             QMessageBox::information(this, "成功", "文件导入成功！");
         }
         else {
@@ -500,5 +502,22 @@ void MainWindow::onDeleteColumn()
     if (m_currentIndex.isValid()) {
         int col = m_currentIndex.column();
         m_dataModel->removeColumns(col, 1);
+    }
+}
+
+void MainWindow::applyRowColumnSizes()
+{
+    const auto& colWidths = m_dataModel->getAllColumnWidths();
+    for (int i = 0; i < colWidths.size(); ++i) {
+        if (colWidths[i] > 0) {
+            m_tableView->setColumnWidth(i, static_cast<int>(colWidths[i]));
+        }
+    }
+
+    const auto& rowHeights = m_dataModel->getAllRowHeights();
+    for (int i = 0; i < rowHeights.size(); ++i) {
+        if (rowHeights[i] > 0) {
+            m_tableView->setRowHeight(i, static_cast<int>(rowHeights[i]));
+        }
     }
 }

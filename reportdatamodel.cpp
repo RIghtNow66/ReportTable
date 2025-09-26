@@ -443,6 +443,7 @@ void ReportDataModel::clearAllCells()
     // 注意：这里不调用begin/endResetModel，因为调用方(loadFromExcel)会负责
     qDeleteAll(m_cells);
     m_cells.clear();
+    clearSizes(); // <-- 新增这一行
 }
 
 void ReportDataModel::addCellDirect(int row, int col, RTCell* cell)
@@ -522,6 +523,54 @@ RTCell* ReportDataModel::ensureCell(int row, int col)
         m_cells[key] = new RTCell();
     }
     return m_cells[key];
+}
+
+void ReportDataModel::setRowHeight(int row, double height)
+{
+    if (row >= m_rowHeights.size()) {
+        m_rowHeights.resize(row + 1);
+    }
+    m_rowHeights[row] = height;
+}
+
+double ReportDataModel::getRowHeight(int row) const
+{
+    if (row < m_rowHeights.size()) {
+        return m_rowHeights[row];
+    }
+    return 0; // 返回0表示使用默认值
+}
+
+void ReportDataModel::setColumnWidth(int col, double width)
+{
+    if (col >= m_columnWidths.size()) {
+        m_columnWidths.resize(col + 1);
+    }
+    m_columnWidths[col] = width;
+}
+
+double ReportDataModel::getColumnWidth(int col) const
+{
+    if (col < m_columnWidths.size()) {
+        return m_columnWidths[col];
+    }
+    return 0; // 返回0表示使用默认值
+}
+
+const QVector<double>& ReportDataModel::getAllRowHeights() const
+{
+    return m_rowHeights;
+}
+
+const QVector<double>& ReportDataModel::getAllColumnWidths() const
+{
+    return m_columnWidths;
+}
+
+void ReportDataModel::clearSizes()
+{
+    m_rowHeights.clear();
+    m_columnWidths.clear();
 }
 
 

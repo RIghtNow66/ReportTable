@@ -70,6 +70,7 @@ struct RTCellStyle {
         font.setFamily("Arial");
         font.setPointSize(10);
         backgroundColor = Qt::white;  // 明确设置白色背景
+        font.setBold(false);
     }
 };
 
