@@ -173,7 +173,6 @@ void ExcelHandler::loadRowColumnSizes(QXlsx::Worksheet* worksheet, ReportDataMod
         if (width > 0) {
             // 转换为像素并存储到模型中
             // 注意：QXlsx的宽度单位可能需要转换
-            qDebug() << "Column" << col << "width:" << width;
         }
     }
 
@@ -181,7 +180,6 @@ void ExcelHandler::loadRowColumnSizes(QXlsx::Worksheet* worksheet, ReportDataMod
     for (int row = 1; row <= worksheet->dimension().lastRow(); ++row) {
         double height = worksheet->rowHeight(row);
         if (height > 0) {
-            qDebug() << "Row" << row << "height:" << height;
         }
     }
 }
@@ -300,54 +298,135 @@ void ExcelHandler::saveMergedCells(QXlsx::Worksheet* worksheet, const QHash<QPoi
     }
 }
 
+// 在ExcelHandler类中添加一个专门的颜色获取方法
+QColor ExcelHandler::getBackgroundColor(const QXlsx::Format& excelFormat)
+{
+    QColor bgColor;
+
+
+    // 方法1：尝试所有可能的颜色获取方式
+    QXlsx::Format::FillPattern fillPattern = excelFormat.fillPattern();
+
+    // 尝试所有颜色相关的方法
+    QColor fg = excelFormat.patternForegroundColor();
+    QColor bg = excelFormat.patternBackgroundColor();
+
+    // 新增：尝试其他可能的颜色API
+    // 根据QXlsx版本，可能存在这些方法：
+   
+
+    // 根据填充模式选择颜色
+    switch (fillPattern) {
+    case QXlsx::Format::PatternSolid:
+        if (fg.isValid()) {
+            bgColor = fg;
+        }
+        else if (bg.isValid()) {
+            bgColor = bg;
+        }
+        else {
+            // QXlsx API失效，通过其他方式判断
+            bgColor = detectColorByOtherMeans(excelFormat);
+        }
+        break;
+
+    case QXlsx::Format::PatternNone:
+        bgColor = Qt::white;
+        break;
+
+    default:
+        if (bg.isValid()) {
+            bgColor = bg;
+        }
+        else if (fg.isValid()) {
+            bgColor = fg;
+        }
+        else {
+            bgColor = Qt::white;
+        }
+        break;
+    }
+
+    return bgColor;
+}
+
+// 当QXlsx颜色API完全失效时的备选方案
+QColor ExcelHandler::detectColorByOtherMeans(const QXlsx::Format& excelFormat)
+{
+
+    bool hasBorder = (excelFormat.leftBorderStyle() != QXlsx::Format::BorderNone ||
+        excelFormat.rightBorderStyle() != QXlsx::Format::BorderNone ||
+        excelFormat.topBorderStyle() != QXlsx::Format::BorderNone ||
+        excelFormat.bottomBorderStyle() != QXlsx::Format::BorderNone);
+
+    if (hasBorder) {
+        return QColor(220, 230, 240);  // 浅蓝色
+    }
+
+    // 方法3：检查字体是否非默认
+    QFont font = excelFormat.font();
+    if (font.pointSize() != 11 || font.family() != "Calibri") {
+        return QColor(255, 255, 220);  // 浅黄色
+    }
+
+    // 默认情况
+    return Qt::white;
+}
 
 void ExcelHandler::convertFromExcelStyle(const QXlsx::Format& excelFormat, RTCellStyle& cellStyle)
 {
-    // 调试背景色读取
-    qDebug() << "=== Background Color Debug ===";
-    qDebug() << "Pattern background:" << excelFormat.patternBackgroundColor();
-    qDebug() << "Pattern foreground:" << excelFormat.patternForegroundColor();
-    qDebug() << "Fill pattern:" << excelFormat.fillPattern();
 
-    // 尝试多种方式获取背景色
-    QColor bgColor = excelFormat.patternBackgroundColor();
-    if (!bgColor.isValid() || bgColor == QColor()) {
-        bgColor = excelFormat.patternForegroundColor();
-        qDebug() << "Using foreground as background";
-    }
-    if (!bgColor.isValid() || bgColor == QColor()) {
-        bgColor = Qt::white;
-        qDebug() << "Using default white";
-    }
+    QFont originalFont = excelFormat.font();
 
-    // 检查是否是QXlsx读取中文字体的错误情况
-    if (cellStyle.font.family() == "Calibri" && excelFormat.fontSize() == 0) {
-        // 这很可能是中文字体被错误读取的情况
-        cellStyle.font.setFamily("SimSun");  // 宋体的英文名
-        cellStyle.font.setPointSize(11);      // 设置合理的默认字号
+    QFont processedFont;
+
+    // 1. 处理字体族名
+    QString fontFamily = originalFont.family();
+    if (fontFamily.isEmpty()) {
+        fontFamily = "SimSun";
     }
     else {
-        // 正常的英文字体，保持原有逻辑
-        int fontSize = excelFormat.fontSize();
-        if (fontSize > 0) {
-            cellStyle.font.setPointSize(fontSize);
-        }
-        else if (cellStyle.font.pointSize() <= 0) {
-            cellStyle.font.setPointSize(10); // 默认字号
-        }
+        fontFamily = mapChineseFontName(fontFamily);
+    }
+    processedFont.setFamily(fontFamily);
+
+    // 2. 处理字体大小
+    int fontSize = originalFont.pointSize();
+    if (fontSize <= 0) {
+        fontSize = 11;
+    }
+    processedFont.setPointSize(fontSize);
+
+    // 3. 处理其他字体属性
+    processedFont.setBold(originalFont.bold());
+    processedFont.setItalic(originalFont.italic());
+    processedFont.setUnderline(originalFont.underline());
+
+    // 4. 修正字体策略设置 - 使用正确的枚举值组合
+    processedFont.setHintingPreference(QFont::PreferDefaultHinting);
+    // 修正 StyleStrategy 的设置方式
+    QFont::StyleStrategy strategy = static_cast<QFont::StyleStrategy>(
+        QFont::PreferAntialias | QFont::PreferQuality);
+    processedFont.setStyleStrategy(strategy);
+
+    cellStyle.font = processedFont;
+
+    // ===== 颜色处理 =====
+    cellStyle.backgroundColor = getBackgroundColor(excelFormat);
+
+    cellStyle.textColor = excelFormat.fontColor();
+    if (!cellStyle.textColor.isValid()) {
+        cellStyle.textColor = Qt::black;
     }
 
-    cellStyle.backgroundColor = bgColor;
-    cellStyle.textColor = excelFormat.fontColor();
-
-
-    // 对齐方式
+    // ===== 对齐方式 =====
     Qt::Alignment hAlign = Qt::AlignLeft;
     switch (excelFormat.horizontalAlignment()) {
     case QXlsx::Format::AlignHCenter: hAlign = Qt::AlignHCenter; break;
     case QXlsx::Format::AlignRight:   hAlign = Qt::AlignRight; break;
     default: break;
     }
+
     Qt::Alignment vAlign = Qt::AlignVCenter;
     switch (excelFormat.verticalAlignment()) {
     case QXlsx::Format::AlignTop:    vAlign = Qt::AlignTop; break;
@@ -356,9 +435,53 @@ void ExcelHandler::convertFromExcelStyle(const QXlsx::Format& excelFormat, RTCel
     }
     cellStyle.alignment = hAlign | vAlign;
 
-    // 边框 - 现在可以正常处理了
+    // ===== 边框 =====
     convertBorderFromExcel(excelFormat, cellStyle.border);
 }
+
+// 中文字体名称映射函数
+QString ExcelHandler::mapChineseFontName(const QString& originalName)
+{
+    // 创建中文字体映射表
+    static QHash<QString, QString> fontMap = {
+        // 常见的Excel中文字体映射
+        {"宋体", "SimSun"},
+        {"黑体", "SimHei"},
+        {"楷体", "KaiTi"},
+        {"仿宋", "FangSong"},
+        {"微软雅黑", "Microsoft YaHei"},
+        {"新宋体", "NSimSun"},
+
+        // 英文字体保持不变
+        {"Calibri", "Calibri"},
+        {"Arial", "Arial"},
+        {"Times New Roman", "Times New Roman"},
+        {"Verdana", "Verdana"},
+
+        // 可能的字体族名变体
+        {"MS Song", "SimSun"},
+        {"MS Gothic", "SimHei"},
+        {"MS Mincho", "SimSun"}
+    };
+
+    // 先尝试直接映射
+    if (fontMap.contains(originalName)) {
+        QString mapped = fontMap[originalName];
+        return mapped;
+    }
+
+    // 如果没有找到映射，检查是否包含中文字符
+    for (const QChar& ch : originalName) {
+        if (ch.unicode() >= 0x4e00 && ch.unicode() <= 0x9fff) {
+            // 包含中文字符，很可能是中文字体
+            return originalName;  // 直接使用原名
+        }
+    }
+
+    // 默认情况，返回原名
+    return originalName;
+}
+
 
 QXlsx::Format ExcelHandler::convertToExcelFormat(const RTCellStyle& cellStyle)
 {

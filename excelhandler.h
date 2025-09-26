@@ -4,6 +4,7 @@
 #include <QString>
 #include <QHash>
 #include <QPoint>
+#include <QFontInfo> 
 
 #include "xlsxformat.h"
 
@@ -39,5 +40,9 @@ private:
     static QXlsx::Format::BorderStyle convertBorderStyleToExcel(RTBorderStyle rtStyle);
 
     void loadRowColumnSizes(QXlsx::Worksheet* worksheet, ReportDataModel* model);
+
+    static QColor getBackgroundColor(const QXlsx::Format& excelFormat);
+    static QColor detectColorByOtherMeans(const QXlsx::Format& excelFormat);
+    static QString mapChineseFontName(const QString& originalName);
 };
 #endif // EXCELHANDLER_H

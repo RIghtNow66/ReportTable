@@ -55,6 +55,46 @@ QSize ReportDataModel::span(const QModelIndex& index) const
 
     return QSize(1, 1);
 }
+
+QFont ReportDataModel::ensureFontAvailable(const QFont& requestedFont) const
+{
+    QFont font = requestedFont;
+
+    // 检查字体是否在系统中可用
+    QFontInfo fontInfo(font);
+    QString actualFamily = fontInfo.family();
+    QString requestedFamily = font.family();
+
+    if (actualFamily != requestedFamily) {
+
+        // 中文字体映射
+        if (requestedFamily.contains("宋体") || requestedFamily == "SimSun") {
+            QStringList alternatives = { "SimSun", "NSimSun", "宋体", "新宋体" };
+            for (const QString& alt : alternatives) {
+                font.setFamily(alt);
+                QFontInfo altInfo(font);
+                if (altInfo.family().contains(alt, Qt::CaseInsensitive)) {
+                    return font;
+                }
+            }
+        }
+
+        if (requestedFamily.contains("黑体") || requestedFamily == "SimHei") {
+            QStringList alternatives = { "Microsoft YaHei", "SimHei", "黑体" };
+            for (const QString& alt : alternatives) {
+                font.setFamily(alt);
+                QFontInfo altInfo(font);
+                if (altInfo.family().contains(alt, Qt::CaseInsensitive)) {
+                    return font;
+                }
+            }
+        }
+        font.setFamily("");
+    }
+
+    return font;
+}
+
 QVariant ReportDataModel::data(const QModelIndex& index, int role) const
 {
     if (!index.isValid())
@@ -64,7 +104,7 @@ QVariant ReportDataModel::data(const QModelIndex& index, int role) const
     if (!cell)
         return QVariant();
 
-    // 对于合并单元格，除了主单元格，其他单元格只显示样式，不显示内容
+    // 对于合并单元格处理
     if (cell->mergedRange.isValid() && cell->mergedRange.isMerged()) {
         bool isMainCell = (index.row() == cell->mergedRange.startRow &&
             index.column() == cell->mergedRange.startCol);
@@ -74,11 +114,13 @@ QVariant ReportDataModel::data(const QModelIndex& index, int role) const
         case Qt::EditRole:
             return isMainCell ? cell->value.toString() : QVariant();
         case Qt::BackgroundRole:
-            return cell->style.backgroundColor;
+            return QBrush(cell->style.backgroundColor);
         case Qt::ForegroundRole:
-            return cell->style.textColor;
-        case Qt::FontRole:
-            return cell->style.font;
+            return QBrush(cell->style.textColor);
+        case Qt::FontRole: {
+            QFont font = ensureFontAvailable(cell->style.font);
+            return font;
+        }
         case Qt::TextAlignmentRole:
             return static_cast<int>(cell->style.alignment);
         default:
@@ -86,18 +128,20 @@ QVariant ReportDataModel::data(const QModelIndex& index, int role) const
         }
     }
 
-    // 普通单元格的处理
+    // 普通单元格处理
     switch (role) {
     case Qt::DisplayRole:
         return cell->displayText();
     case Qt::EditRole:
         return cell->editText();
     case Qt::BackgroundRole:
-        return cell->style.backgroundColor;
+        return QBrush(cell->style.backgroundColor);
     case Qt::ForegroundRole:
-        return cell->style.textColor;
-    case Qt::FontRole:
-        return cell->style.font;
+        return QBrush(cell->style.textColor);
+    case Qt::FontRole: {
+        QFont font = ensureFontAvailable(cell->style.font);
+        return font;
+    }
     case Qt::TextAlignmentRole:
         return static_cast<int>(cell->style.alignment);
     default:

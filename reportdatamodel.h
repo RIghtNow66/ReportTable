@@ -4,6 +4,9 @@
 #include "Cell.h"
 #include <QHash>
 #include <QAbstractTableModel>
+#include <QFontInfo>      // 添加这个
+#include <QFontDatabase>  // 如果需要的话
+#include <QBrush>         // 添加这个
 #include <QPoint>
 #include <QSize>
 
@@ -55,6 +58,7 @@ public:
     void calculateFormula(int row, int col);
     QString cellAddress(int row, int col) const;
 
+    QFont ensureFontAvailable(const QFont& requestedFont) const;
 signals:
     void cellChanged(int row, int col);
 
