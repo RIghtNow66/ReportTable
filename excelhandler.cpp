@@ -79,10 +79,28 @@ bool ExcelHandler::loadFromFile(const QString& fileName, ReportDataModel* model)
 
                 // 读取公式和值
                 QVariant rawData = worksheet->read(row, col);
-                if (rawData.type() == QVariant::String && rawData.toString().startsWith('=')) {
-                    newCell->setFormula(rawData.toString());
+                QString rawString;
+                if (rawData.type() == QVariant::String)
+                {
+					rawString = rawData.toString();
                 }
-                newCell->value = xlsxCell->value();
+
+                if (!rawString.isEmpty() && rawString.startsWith("##")) {
+                    newCell->isDataBinding = true;
+                    newCell->bindingKey = rawString;
+                    newCell->value = "0.0"; // 设置加载中的临时占位符
+                    newCell->hasFormula = false; // 清除公式标记
+                }
+                else if (rawData.type() == QVariant::String && rawData.toString().startsWith('=')) {
+                    newCell->setFormula(rawString);
+					newCell->isDataBinding = false;
+                }
+                else
+                {
+                    newCell->value = xlsxCell->value(); // 使用 cell->value() 获取最合适类型的数据
+                    newCell->isDataBinding = false;
+                    newCell->hasFormula = false;
+                }
 
                 // 转换格式
                 if (xlsxCell->format().isValid()) {

@@ -28,3 +28,6 @@ tmp
 .vs/
 release/
 debug/
+lib/
+toZip/
+include/

@@ -11,7 +11,7 @@ SOURCES += \
     reportdatamodel.cpp\
     formulaengine.cpp\
     excelhandler.cpp\
-	ReportTable.cpp
+	EnhancedTableView.cpp\
 
 HEADERS +=\
     mainwindow.h\
@@ -19,6 +19,6 @@ HEADERS +=\
     formulaengine.h\
     excelhandler.h\
     Cell.h\
-	ReportTable.h
+	EnhancedTableView.h\
 
 RESOURCES += ReportTable.qrc

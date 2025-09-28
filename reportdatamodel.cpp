@@ -159,11 +159,23 @@ bool ReportDataModel::setData(const QModelIndex& index, const QVariant& value, i
 
     QString text = value.toString();
 
-    if (text.startsWith('=')) {
+    if (text.startsWith('##'))
+    {
+        cell->isDataBinding = true;
+        cell->bindingKey = text;
+		cell->hasFormula = false;
+        cell->formula.clear();
+        cell->value = "0";
+		//resolveDataBindings();
+
+    }
+    else if (text.startsWith('=')) {
+        cell->isDataBinding = false;
         cell->setFormula(text);
         calculateFormula(index.row(), index.column());
     }
     else {
+        cell->isDataBinding = false;
         // 如果之前是公式，现在清空
         if (cell->hasFormula) {
             cell->formula.clear();
@@ -415,13 +427,11 @@ bool ReportDataModel::removeColumns(int column, int count, const QModelIndex& pa
 
 bool ReportDataModel::loadFromExcel(const QString& fileName)
 {
-    // --- 核心修改：在加载前，彻底重置模型 ---
     beginResetModel();
     clearAllCells(); // 这会清空 m_cells 和尺寸向量
     m_maxRow = 100;    // 恢复默认行数
     m_maxCol = 26;     // 恢复默认列数
     endResetModel();
-    // ------------------------------------
 
     // 重新发出 beginResetModel 信号，为加载新数据做准备
     beginResetModel();
@@ -430,18 +440,48 @@ bool ReportDataModel::loadFromExcel(const QString& fileName)
 
     // 加载成功后，统一重新计算所有公式
     if (result) {
+        //resolveDataBindings();
         recalculateAllFormulas();
     }
     return result;
 }
 
-bool ReportDataModel::saveToExcel(const QString& fileName)
-{
-    // 直接委托给ExcelHandler处理
-    return ExcelHandler::saveToFile(fileName, this);
-}
+// 这个函数是核心，它负责收集所有需要绑定的Key，
+// 并通过信号发送给外部（例如MainWindow）去查询数据。
+//void ReportDataModel::resolveDataBindings()
+//{
+//    QList<QString> keysToResolve;
+//    for (auto it = m_cells.constBegin(); it != m_cells.constEnd(); ++it) {
+//        RTCell* cell = it.value();
+//        if (cell && cell->isDataBinding) {
+//            keysToResolve.append(cell->bindingKey);
+//        }
+//    }
+//
+//    if (keysToResolve.isEmpty()) {
+//        return;
+//    }
+//
+//    //QHash<QString, QVariant> resolvedData = UniversalQueryEngine::instance().queryValuesForBindingKeys(keysToResolve);
+//
+//    // 更新单元格的值
+//    for (auto it = m_cells.begin(); it != m_cells.end(); ++it) {
+//        RTCell* cell = it.value();
+//        if (cell && cell->isDataBinding && resolvedData.contains(cell->bindingKey)) {
+//            cell->value = resolvedData[cell->bindingKey];
+//        }
+//    }
+//
+//    // 通知整个视图刷新，因为多个单元格数据可能已改变
+//    emit dataChanged(index(0, 0), index(m_maxRow - 1, m_maxCol - 1));
+//}
+//
+//bool ReportDataModel::saveToExcel(const QString& fileName)
+//{
+//    // 直接委托给ExcelHandler处理
+//    return ExcelHandler::saveToFile(fileName, this);
+//}
 
-// --- 公共接口实现 (供ExcelHandler等外部类使用) ---
 
 void ReportDataModel::clearAllCells()
 {

@@ -47,7 +47,7 @@ public:
 
     // --- 文件操作 (现在会调用ExcelHandler) ---
     bool loadFromExcel(const QString& fileName);
-    bool saveToExcel(const QString& fileName);
+    //bool saveToExcel(const QString& fileName);
 
     // --- 公共接口 (供ExcelHandler和FormulaEngine使用) ---
     void clearAllCells();
@@ -69,8 +69,14 @@ public:
     const QVector<double>& getAllRowHeights() const;
     const QVector<double>& getAllColumnWidths() const;
     void clearSizes();
+
+    // 数据绑定的解析与查询
+	//void resolveDataBindings();
+
 signals:
     void cellChanged(int row, int col);
+
+    //void dataBingResolving(const QList<QString&> keys);
 
 public:
     RTCell* getCell(int row, int col);

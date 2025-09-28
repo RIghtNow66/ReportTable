@@ -203,17 +203,17 @@ void MainWindow::onImportExcel()
 
 void MainWindow::onExportExcel()
 {
-    QString fileName = QFileDialog::getSaveFileName(this,
-        "导出Excel文件", "", "Excel文件 (*.xlsx)");
+    //QString fileName = QFileDialog::getSaveFileName(this,
+    //    "导出Excel文件", "", "Excel文件 (*.xlsx)");
 
-    if (!fileName.isEmpty()) {
-        if (m_dataModel->saveToExcel(fileName)) {
-            QMessageBox::information(this, "成功", "文件导出成功！");
-        }
-        else {
-            QMessageBox::warning(this, "错误", "文件导出失败！");
-        }
-    }
+    //if (!fileName.isEmpty()) {
+    //    if (m_dataModel->saveToExcel(fileName)) {
+    //        QMessageBox::information(this, "成功", "文件导出成功！");
+    //    }
+    //    else {
+    //        QMessageBox::warning(this, "错误", "文件导出失败！");
+    //    }
+    //}
 }
 
 void MainWindow::onFind()

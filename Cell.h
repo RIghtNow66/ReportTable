@@ -81,6 +81,9 @@ struct RTCell {
     bool hasFormula = false;
 	RTMergedRange mergedRange;
 
+    bool isDataBinding = false;
+    QString bindingKey;
+
     RTCell() = default;
 
     void setFormula(const QString& formulaText) {
@@ -93,6 +96,10 @@ struct RTCell {
     }
 
     QString editText() const {
+        if (isDataBinding)
+        {
+            return bindingKey;
+        }
         return hasFormula ? formula : value.toString();
     }
 
