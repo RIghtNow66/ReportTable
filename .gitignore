@@ -22,6 +22,7 @@ Makefile
 *.qtvscr
 *.vcxproj
 *.vcxproj.filters
+*.bat
 tmp
 
 # QXlsx 整个目录（不上传）

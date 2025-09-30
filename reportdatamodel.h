@@ -36,10 +36,10 @@ public:
     bool setData(const QModelIndex& index, const QVariant& value, int role = Qt::EditRole) override;
     Qt::ItemFlags flags(const QModelIndex& index) const override;
     QVariant headerData(int section, Qt::Orientation orientation, int role = Qt::DisplayRole) const override;
-    
+
     // 支持合并单元格
     QSize span(const QModelIndex& index) const;
-    
+
     bool insertRows(int row, int count, const QModelIndex& parent = QModelIndex()) override;
     bool removeRows(int row, int count, const QModelIndex& parent = QModelIndex()) override;
     bool insertColumns(int column, int count, const QModelIndex& parent = QModelIndex()) override;
@@ -47,7 +47,7 @@ public:
 
     // --- 文件操作 (现在会调用ExcelHandler) ---
     bool loadFromExcel(const QString& fileName);
-    //bool saveToExcel(const QString& fileName);
+    bool saveToExcel(const QString& fileName);
 
     // --- 公共接口 (供ExcelHandler和FormulaEngine使用) ---
     void clearAllCells();
@@ -71,12 +71,12 @@ public:
     void clearSizes();
 
     // 数据绑定的解析与查询
-	//void resolveDataBindings();
+    void resolveDataBindings();
 
 signals:
     void cellChanged(int row, int col);
 
-    //void dataBingResolving(const QList<QString&> keys);
+    //void dataBingResolving(const QList<QString>& keys);
 
 public:
     RTCell* getCell(int row, int col);
@@ -94,3 +94,5 @@ private:
 };
 
 #endif // REPORTDATAMODEL_H
+
+

@@ -1,9 +1,13 @@
 TEMPLATE = app
 LANGUAGE = C++
 TARGET = ScadaReportControl
-QT += core widgets
 
 include(QXlsx/QXlsx/QXlsx.pri)
+include( $(DEVHOME)/source/include/projectdef.pro )
+LIBS += -liosal -ligdbi -lihmiapi -linetapi -lirtdbapi  -ltaos -litaosdbms
+INCLUDEPATH += $${APP_INC}
+
+QT += core widgets gui core-private gui-private svg
 
 SOURCES += \
     main.cpp\
@@ -12,6 +16,9 @@ SOURCES += \
     formulaengine.cpp\
     excelhandler.cpp\
 	EnhancedTableView.cpp\
+	UniversalQueryEngine.cpp\
+	TaosDataFetcher.cpp\
+	
 
 HEADERS +=\
     mainwindow.h\
@@ -20,5 +27,7 @@ HEADERS +=\
     excelhandler.h\
     Cell.h\
 	EnhancedTableView.h\
+	UniversalQueryEngine.h\
+	TaosDataFetcher.h\
 
 RESOURCES += ReportTable.qrc
