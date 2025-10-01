@@ -5,7 +5,7 @@
 #include <QVariant>
 #include <QString>
 #include <QStack>
-#include "Cell.h"
+#include "DataBindingConfig.h"
 
 class ReportDataModel;
 

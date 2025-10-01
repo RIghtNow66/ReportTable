@@ -1,6 +1,6 @@
 #include "EnhancedTableView.h"
 #include "reportdatamodel.h"
-#include "Cell.h"
+#include "DataBindingConfig.h"
 #include <QPaintEvent>
 #include <QPainter>
 #include <QHeaderView>
@@ -44,7 +44,7 @@ void EnhancedTableView::drawBorders(QPainter* painter)
     // 绘制每个单元格的边框
     for (int row = firstRow; row <= lastRow; ++row) {
         for (int col = firstCol; col <= lastCol; ++col) {
-            const RTCell* cell = reportModel->getCell(row, col);
+            const CellData* cell = reportModel->getCell(row, col);
             if (!cell) continue;
 
             QModelIndex index = reportModel->index(row, col);
@@ -127,7 +127,7 @@ void EnhancedTableView::updateSpans()
     const auto& allCells = reportModel->getAllCells();
     for (auto it = allCells.constBegin(); it != allCells.constEnd(); ++it) {
         const QPoint& pos = it.key();
-        const RTCell* cell = it.value();
+        const CellData* cell = it.value();
 
         if (cell && cell->isMergedMain()) {
             int rowSpan = cell->mergedRange.rowSpan();

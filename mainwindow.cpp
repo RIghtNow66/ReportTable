@@ -10,6 +10,7 @@
 #include <QLineEdit>
 #include <QInputDialog>
 #include <QSortFilterProxyModel>
+#include "TaosDataFetcher.h"
 
 MainWindow::MainWindow(QWidget* parent)
     : QMainWindow(parent)
@@ -17,6 +18,12 @@ MainWindow::MainWindow(QWidget* parent)
 	, m_formulaEditMode(false)
     , m_filterModel(nullptr)
 {
+    // 初始化默认时间：今日00:00 到当前时间，间隔5分钟
+    QDateTime now = QDateTime::currentDateTime();
+    m_currentStartTime = QDateTime(now.date(), QTime(0, 0, 0));
+    m_currentEndTime = now;
+    m_currentInterval = 300; // 5分钟 = 300秒
+
     setupUI();
     setupToolBar();
     setupFormulaBar();
@@ -50,15 +57,17 @@ void MainWindow::setupToolBar()
     m_toolBar->addAction("导入", this, &MainWindow::onImportExcel);
     m_toolBar->addAction("导出", this, &MainWindow::onExportExcel);
     m_toolBar->addSeparator();
+
+    m_toolBar->addAction("时间设置", this, &MainWindow::onTimeSettings);
     m_toolBar->addSeparator();
 
     // 工具操作
     m_toolBar->addAction("查找", this, &MainWindow::onFind);
     m_toolBar->addAction("筛选", this, &MainWindow::onFilter);
-    m_toolBar->addSeparator();
-
     // 清楚筛选
     m_toolBar->addAction("清除筛选", this, &MainWindow::onClearFilter);
+
+    m_toolBar->addSeparator();
 }
 
 void MainWindow::setupFormulaBar()
@@ -162,7 +171,7 @@ void MainWindow::updateTableSpans()
     // 设置新的span
     for (auto it = allCells.constBegin(); it != allCells.constEnd(); ++it) {
         const QPoint& pos = it.key();
-        const RTCell* cell = it.value();
+        const CellData* cell = it.value();
 
         if (cell && cell->mergedRange.isValid() && cell->mergedRange.isMerged()) {
             // 只为主单元格设置span
@@ -521,4 +530,131 @@ void MainWindow::applyRowColumnSizes()
             m_tableView->setRowHeight(i, static_cast<int>(rowHeights[i]));
         }
     }
+}
+
+// 新增：时间设置槽函数
+void MainWindow::onTimeSettings()
+{
+    TimeSettingsDialog dialog(this);
+
+    // 从全局配置读取
+    dialog.setStartTime(m_globalConfig.globalTimeRange.startTime);
+
+    if (dialog.exec() == QDialog::Accepted) {
+        // 更新全局配置
+        m_globalConfig.globalTimeRange.startTime = dialog.getStartTime();
+        m_globalConfig.globalTimeRange.endTime = dialog.getEndTime();
+        m_globalConfig.globalTimeRange.intervalSeconds = dialog.getIntervalSeconds();
+
+        // 同步到Model
+        m_dataModel->setGlobalConfig(m_globalConfig);
+
+        // 刷新数据
+        refreshDataWithCurrentTime();
+    }
+}
+
+// 新增：刷新数据槽函数（预留）
+void MainWindow::onRefreshData()
+{
+    // TODO: 后续实现数据查询和更新逻辑
+    QMessageBox::information(this, "提示",
+        QString("将使用以下时间范围查询数据：\n起始：%1\n终止：%2\n间隔：%3秒\n\n（数据查询功能待实现）")
+        .arg(m_currentStartTime.toString("yyyy-MM-dd HH:mm:ss"))
+        .arg(m_currentEndTime.toString("yyyy-MM-dd HH:mm:ss"))
+        .arg(m_currentInterval));
+}
+
+void MainWindow::refreshDataWithCurrentTime()
+{
+    // 1. 获取全局时间配置
+    const TimeRangeConfig& timeRange = m_globalConfig.globalTimeRange;
+    const QString& defaultRTU = m_globalConfig.defaultRTU;
+
+    // 2. 收集所有需要查询的绑定键
+    QList<QString> allBindingKeys;
+    QHash<QString, QPoint> keyToCellPos;  // 记录绑定键对应的单元格位置
+
+    const auto& allCells = m_dataModel->getAllCells();
+    for (auto it = allCells.constBegin(); it != allCells.constEnd(); ++it) {
+        const CellData* cell = it.value();
+        if (cell && cell->isDataBinding && !cell->bindingKey.isEmpty()) {  // 改为单个bindingKey
+            if (!allBindingKeys.contains(cell->bindingKey)) {
+                allBindingKeys.append(cell->bindingKey);
+            }
+            keyToCellPos.insert(cell->bindingKey, it.key());
+        }
+    }
+
+    if (allBindingKeys.isEmpty()) {
+        QMessageBox::information(this, "提示", "报表中没有数据绑定");
+        return;
+    }
+
+    // 3. 构造TaosDB查询地址并查询
+    QHash<QString, QVariant> results;  // 存储查询结果
+
+    for (const QString& bindingKey : allBindingKeys) {
+        try {
+            // 提取遥测号（去掉##前缀）
+            QString ycno;
+            if (bindingKey.startsWith("##")) {
+                // 简单提取：##TEMP_01 -> TEMP_01
+                // 实际可能需要映射表：TEMP_01 -> AIRTU000100006
+                ycno = defaultRTU;  // 暂时使用默认RTU
+            }
+
+            // 构造查询地址
+            QString taosAddress = QString("%1@%2~%3#%4")
+                .arg(ycno)
+                .arg(timeRange.startTime.toString("yyyy-MM-dd HH:mm:ss"))
+                .arg(timeRange.endTime.toString("yyyy-MM-dd HH:mm:ss"))
+                .arg(timeRange.intervalSeconds);
+
+            // 查询数据
+            TaosDataFetcher fetcher;
+            auto data = fetcher.fetchDataFromAddress(taosAddress.toStdString());
+
+            // 取最新值（或计算平均值/最大值等）
+            if (!data.empty()) {
+                // 获取最后一个时间点的值
+                auto lastEntry = data.rbegin();
+                if (!lastEntry->second.empty()) {
+                    float value = lastEntry->second[0];
+                    results[bindingKey] = value;
+                }
+                else {
+                    results[bindingKey] = "无数据";
+                }
+            }
+            else {
+                results[bindingKey] = "无数据";
+            }
+
+        }
+        catch (const std::exception& e) {
+            results[bindingKey] = QString("查询失败: %1").arg(e.what());
+        }
+    }
+
+    // 4. 更新单元格数据
+    int successCount = 0;
+    for (auto it = results.constBegin(); it != results.constEnd(); ++it) {
+        QPoint pos = keyToCellPos.value(it.key());
+        CellData* cell = m_dataModel->getCell(pos.x(), pos.y());
+        if (cell) {
+            cell->value = it.value();
+            successCount++;
+        }
+    }
+
+    // 5. 刷新视图
+    m_dataModel->dataChanged(
+        m_dataModel->index(0, 0),
+        m_dataModel->index(m_dataModel->rowCount() - 1, m_dataModel->columnCount() - 1)
+    );
+
+    // 6. 提示结果
+    QMessageBox::information(this, "刷新完成",
+        QString("成功更新 %1 个数据绑定单元格").arg(successCount));
 }

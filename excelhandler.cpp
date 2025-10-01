@@ -1,6 +1,6 @@
 ﻿#include "excelhandler.h"
 #include "reportdatamodel.h"
-#include "Cell.h"
+#include "DataBindingConfig.h"
 
 #include <QMessageBox>
 #include <QFileInfo>
@@ -75,7 +75,7 @@ bool ExcelHandler::loadFromFile(const QString& fileName, ReportDataModel* model)
             auto xlsxCell = worksheet->cellAt(row, col);
 
             if (xlsxCell) {
-                RTCell* newCell = new RTCell();
+                CellData* newCell = new CellData();
 
                 // 读取公式和值
                 QVariant rawData = worksheet->read(row, col);
@@ -87,7 +87,7 @@ bool ExcelHandler::loadFromFile(const QString& fileName, ReportDataModel* model)
 
                 if (!rawString.isEmpty() && rawString.startsWith("##")) {
                     newCell->isDataBinding = true;
-                    newCell->bindingKey = rawString;
+                    newCell->bindingKey=rawString;
                     newCell->value = "0.0"; // 设置加载中的临时占位符
                     newCell->hasFormula = false; // 清除公式标记
                 }
@@ -152,7 +152,7 @@ bool ExcelHandler::loadFromFile(const QString& fileName, ReportDataModel* model)
         processedMergedRanges.insert(rangeKey);
 
         // 获取主单元格（左上角）
-        RTCell* mainCell = model->getCell(mergedRange.startRow, mergedRange.startCol);
+        CellData* mainCell = model->getCell(mergedRange.startRow, mergedRange.startCol);
         if (!mainCell) {
             // 如果主单元格不存在，创建一个
             mainCell = model->ensureCell(mergedRange.startRow, mergedRange.startCol);
@@ -162,7 +162,7 @@ bool ExcelHandler::loadFromFile(const QString& fileName, ReportDataModel* model)
         // 将主单元格的样式复制到合并区域内的所有单元格
         for (int row = mergedRange.startRow; row <= mergedRange.endRow; ++row) {
             for (int col = mergedRange.startCol; col <= mergedRange.endCol; ++col) {
-                RTCell* cell = model->ensureCell(row, col);
+                CellData* cell = model->ensureCell(row, col);
                 if (cell) {
                     // 设置合并信息
                     cell->mergedRange = mergedRange;
@@ -247,7 +247,7 @@ bool ExcelHandler::saveToFile(const QString& fileName, ReportDataModel* model)
     for (auto it = allCells.constBegin(); it != allCells.constEnd(); ++it) {
         if (progress->wasCanceled()) return false;
         const QPoint& modelPos = it.key();
-        const RTCell* cell = it.value();
+        const CellData* cell = it.value();
 
         int excelRow = modelPos.x() + 1;
         int excelCol = modelPos.y() + 1;
@@ -324,12 +324,12 @@ void ExcelHandler::loadMergedCells(QXlsx::Worksheet* worksheet, QHash<QPoint, RT
     }
 }
 
-void ExcelHandler::saveMergedCells(QXlsx::Worksheet* worksheet, const QHash<QPoint, RTCell*>& allCells)
+void ExcelHandler::saveMergedCells(QXlsx::Worksheet* worksheet, const QHash<QPoint, CellData*>& allCells)
 {
     QSet<RTMergedRange*> processedRanges;  // 避免重复处理相同的合并范围
 
     for (auto it = allCells.constBegin(); it != allCells.constEnd(); ++it) {
-        const RTCell* cell = it.value();
+        const CellData* cell = it.value();
 
         if (cell->isMergedMain() && !processedRanges.contains(const_cast<RTMergedRange*>(&cell->mergedRange))) {
             // 转换为Excel的1基索引

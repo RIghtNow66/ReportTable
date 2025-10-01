@@ -10,7 +10,7 @@
 
 // 前向声明所有需要的类型
 class ReportDataModel;
-struct RTCell;
+struct CellData;
 struct RTCellStyle;
 struct RTCellBorder;      // 添加这个声明
 struct RTMergedRange;
@@ -33,7 +33,7 @@ private:
     static bool isValidExcelFile(const QString& fileName);
 
     static void loadMergedCells(QXlsx::Worksheet* worksheet, QHash<QPoint, RTMergedRange>& mergedRanges);
-    static void saveMergedCells(QXlsx::Worksheet* worksheet, const QHash<QPoint, RTCell*>& allCells);
+    static void saveMergedCells(QXlsx::Worksheet* worksheet, const QHash<QPoint, CellData*>& allCells);
     static void convertBorderFromExcel(const QXlsx::Format& excelFormat, RTCellBorder& border);
     static void convertBorderToExcel(const RTCellBorder& border, QXlsx::Format& excelFormat);
     static RTBorderStyle convertBorderStyleFromExcel(QXlsx::Format::BorderStyle xlsxStyle);

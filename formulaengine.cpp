@@ -67,7 +67,7 @@ QVariant FormulaEngine::evaluateSum(const QString& range, ReportDataModel* model
     double sum = 0.0;
     for (int row = cellRange.first.x(); row <= cellRange.second.x(); ++row) {
         for (int col = cellRange.first.y(); col <= cellRange.second.y(); ++col) {
-            const RTCell* cell = model->getCell(row, col);
+            const CellData* cell = model->getCell(row, col);
             if (cell) {
                 bool ok;
                 double value = cell->value.toDouble(&ok);
@@ -92,7 +92,7 @@ QVariant FormulaEngine::evaluateMax(const QString& range, ReportDataModel* model
 
     for (int row = cellRange.first.x(); row <= cellRange.second.x(); ++row) {
         for (int col = cellRange.first.y(); col <= cellRange.second.y(); ++col) {
-            const RTCell* cell = model->getCell(row, col);
+            const CellData* cell = model->getCell(row, col);
             if (cell) {
                 bool ok;
                 double value = cell->value.toDouble(&ok);
@@ -120,7 +120,7 @@ QVariant FormulaEngine::evaluateMin(const QString& range, ReportDataModel* model
 
     for (int row = cellRange.first.x(); row <= cellRange.second.x(); ++row) {
         for (int col = cellRange.first.y(); col <= cellRange.second.y(); ++col) {
-            const RTCell* cell = model->getCell(row, col);
+            const CellData* cell = model->getCell(row, col);
             if (cell) {
                 bool ok;
                 double value = cell->value.toDouble(&ok);
@@ -253,7 +253,7 @@ QVariant FormulaEngine::getCellValue(const QString& cellRef, ReportDataModel* mo
         return QVariant(0.0);
     }
 
-    const RTCell* cell = model->getCell(pos.x(), pos.y());
+    const CellData* cell = model->getCell(pos.x(), pos.y());
     if (!cell) {
         return QVariant(0.0);
     }

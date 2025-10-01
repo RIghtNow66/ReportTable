@@ -18,6 +18,7 @@ SOURCES += \
 	EnhancedTableView.cpp\
 	UniversalQueryEngine.cpp\
 	TaosDataFetcher.cpp\
+	TimeSettingsDialog.cpp\
 	
 
 HEADERS +=\
@@ -25,9 +26,10 @@ HEADERS +=\
     reportdatamodel.h\
     formulaengine.h\
     excelhandler.h\
-    Cell.h\
+    DataBindingConfig.h\
 	EnhancedTableView.h\
 	UniversalQueryEngine.h\
 	TaosDataFetcher.h\
+	TimeSettingsDialog.h\
 
 RESOURCES += ReportTable.qrc

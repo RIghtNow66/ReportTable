@@ -14,6 +14,9 @@
 #include <QPushButton>
 #include <QSortFilterProxyModel>
 
+#include "TimeSettingsDialog.h"  // 新增
+#include "DataBindingConfig.h" 
+
 class ReportDataModel;
 
 class MainWindow : public QMainWindow
@@ -46,6 +49,9 @@ private slots:
     void onDeleteRow();
     void onDeleteColumn();
 
+    void onTimeSettings();
+    void onRefreshData();  // 新增：刷新数据
+
 private:
     void setupUI();
     void setupToolBar();
@@ -61,6 +67,8 @@ private:
     void updateTableSpans();
 
     void applyRowColumnSizes(); // <-- 新增这个函数声明
+
+    void refreshDataWithCurrentTime();
 
 private:
     // UI组件
@@ -92,6 +100,13 @@ private:
     bool m_updating;
     bool m_formulaEditMode; // 新增：标识是否在公式编辑模式
     QModelIndex m_formulaEditingIndex; // 新增：记录正在编辑公式的单元格
+
+    // 新增：时间设置相关
+    QDateTime m_currentStartTime;
+    QDateTime m_currentEndTime;
+    int m_currentInterval;
+
+    GlobalDataConfig m_globalConfig;  // 全局配置
 };
 
 #endif // MAINWINDOW_H

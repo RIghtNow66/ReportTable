@@ -43,7 +43,7 @@ QSize ReportDataModel::span(const QModelIndex& index) const
     if (!index.isValid())
         return QSize(1, 1);
 
-    const RTCell* cell = getCell(index.row(), index.column());
+    const CellData* cell = getCell(index.row(), index.column());
     if (!cell || !cell->mergedRange.isValid() || !cell->mergedRange.isMerged())
         return QSize(1, 1);
 
@@ -100,7 +100,7 @@ QVariant ReportDataModel::data(const QModelIndex& index, int role) const
     if (!index.isValid())
         return QVariant();
 
-    const RTCell* cell = getCell(index.row(), index.column());
+    const CellData* cell = getCell(index.row(), index.column());
     if (!cell)
         return QVariant();
 
@@ -154,7 +154,7 @@ bool ReportDataModel::setData(const QModelIndex& index, const QVariant& value, i
     if (!index.isValid() || role != Qt::EditRole)
         return false;
 
-    RTCell* cell = ensureCell(index.row(), index.column());
+    CellData* cell = ensureCell(index.row(), index.column());
     if (!cell) return false;
 
     QString text = value.toString();
@@ -196,7 +196,7 @@ Qt::ItemFlags ReportDataModel::flags(const QModelIndex& index) const
         return Qt::NoItemFlags;
 
     // 检查是否是合并单元格的从属单元格
-    const RTCell* cell = getCell(index.row(), index.column());
+    const CellData* cell = getCell(index.row(), index.column());
     if (cell && cell->mergedRange.isValid() && cell->mergedRange.isMerged()) {
         // 如果不是主单元格，则不可编辑
         if (!(index.row() == cell->mergedRange.startRow &&
@@ -235,10 +235,10 @@ bool ReportDataModel::insertRows(int row, int count, const QModelIndex& parent)
 
     beginInsertRows(QModelIndex(), row, row + count - 1);
 
-    QHash<QPoint, RTCell*> newCells;
+    QHash<QPoint, CellData*> newCells;
     for (auto it = m_cells.begin(); it != m_cells.end(); ++it) {
         QPoint oldPos = it.key();
-        RTCell* cell = it.value();
+        CellData* cell = it.value();
 
         if (oldPos.x() >= row) {
             // 将此行及以下的单元格向下移动
@@ -278,10 +278,10 @@ bool ReportDataModel::removeRows(int row, int count, const QModelIndex& parent)
 
     beginRemoveRows(QModelIndex(), row, row + count - 1);
 
-    QHash<QPoint, RTCell*> newCells;
+    QHash<QPoint, CellData*> newCells;
     for (auto it = m_cells.begin(); it != m_cells.end(); ++it) {
         QPoint oldPos = it.key();
-        RTCell* cell = it.value();
+        CellData* cell = it.value();
 
         if (oldPos.x() >= row && oldPos.x() < row + count) {
             // 删除被移除范围内的单元格
@@ -334,10 +334,10 @@ bool ReportDataModel::insertColumns(int column, int count, const QModelIndex& pa
 
     beginInsertColumns(QModelIndex(), column, column + count - 1);
 
-    QHash<QPoint, RTCell*> newCells;
+    QHash<QPoint, CellData*> newCells;
     for (auto it = m_cells.begin(); it != m_cells.end(); ++it) {
         QPoint oldPos = it.key();
-        RTCell* cell = it.value();
+        CellData* cell = it.value();
 
         if (oldPos.y() >= column) {
             QPoint newPos(oldPos.x(), oldPos.y() + count);
@@ -376,10 +376,10 @@ bool ReportDataModel::removeColumns(int column, int count, const QModelIndex& pa
 
     beginRemoveColumns(QModelIndex(), column, column + count - 1);
 
-    QHash<QPoint, RTCell*> newCells;
+    QHash<QPoint, CellData*> newCells;
     for (auto it = m_cells.begin(); it != m_cells.end(); ++it) {
         QPoint oldPos = it.key();
-        RTCell* cell = it.value();
+        CellData* cell = it.value();
 
         if (oldPos.y() >= column && oldPos.y() < column + count) {
             delete cell;
@@ -452,7 +452,7 @@ void ReportDataModel::resolveDataBindings()
 {
     QList<QString> keysToResolve;
     for (auto it = m_cells.constBegin(); it != m_cells.constEnd(); ++it) {
-        RTCell* cell = it.value();
+        CellData* cell = it.value();
         if (cell && cell->isDataBinding) {
             keysToResolve.append(cell->bindingKey);
         }
@@ -466,7 +466,7 @@ void ReportDataModel::resolveDataBindings()
 
     // 更新单元格的值
     for (auto it = m_cells.begin(); it != m_cells.end(); ++it) {
-        RTCell* cell = it.value();
+        CellData* cell = it.value();
         if (cell && cell->isDataBinding && resolvedData.contains(cell->bindingKey)) {
             cell->value = resolvedData[cell->bindingKey];
         }
@@ -493,7 +493,7 @@ void ReportDataModel::clearAllCells()
     clearSizes(); // <-- 新增这一行
 }
 
-void ReportDataModel::addCellDirect(int row, int col, RTCell* cell)
+void ReportDataModel::addCellDirect(int row, int col, CellData* cell)
 {
     // 此方法专为Excel高速加载设计，不触发信号
     QPoint key(row, col);
@@ -511,7 +511,7 @@ void ReportDataModel::updateModelSize(int newRowCount, int newColCount)
     // 注意：同样不调用begin/endResetModel，由调用方负责
 }
 
-const QHash<QPoint, RTCell*>& ReportDataModel::getAllCells() const
+const QHash<QPoint, CellData*>& ReportDataModel::getAllCells() const
 {
     return m_cells;
 }
@@ -543,7 +543,7 @@ QString ReportDataModel::cellAddress(int row, int col) const
 
 void ReportDataModel::calculateFormula(int row, int col)
 {
-    RTCell* cell = getCell(row, col);
+    CellData* cell = getCell(row, col);
     if (!cell || !cell->hasFormula)
         return;
 
@@ -552,22 +552,22 @@ void ReportDataModel::calculateFormula(int row, int col)
     cell->value = result;
 }
 
-RTCell* ReportDataModel::getCell(int row, int col)
+CellData* ReportDataModel::getCell(int row, int col)
 {
     return m_cells.value(QPoint(row, col), nullptr);
 }
 
-const RTCell* ReportDataModel::getCell(int row, int col) const
+const CellData* ReportDataModel::getCell(int row, int col) const
 {
     return m_cells.value(QPoint(row, col), nullptr);
 }
 
-RTCell* ReportDataModel::ensureCell(int row, int col)
+CellData* ReportDataModel::ensureCell(int row, int col)
 {
     QPoint key(row, col);
     if (!m_cells.contains(key)) {
         // 如果单元格不存在，则创建一个新的
-        m_cells[key] = new RTCell();
+        m_cells[key] = new CellData();
     }
     return m_cells[key];
 }
@@ -618,6 +618,23 @@ void ReportDataModel::clearSizes()
 {
     m_rowHeights.clear();
     m_columnWidths.clear();
+}
+
+void ReportDataModel::setGlobalConfig(const GlobalDataConfig& config)
+{
+    m_globalConfig = config;
+}
+
+GlobalDataConfig ReportDataModel::getGlobalConfig() const
+{
+    return m_globalConfig;
+}
+
+void ReportDataModel::updateGlobalTimeRange(const TimeRangeConfig& timeRange)
+{
+    m_globalConfig.globalTimeRange = timeRange;
+    // 可选：发射信号通知时间范围已更新
+    emit dataChanged(index(0, 0), index(m_maxRow - 1, m_maxCol - 1));
 }
 
 
