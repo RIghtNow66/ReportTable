@@ -15,6 +15,7 @@
 #include <QSortFilterProxyModel>
 #include <QFileInfo>
 #include <QDebug>
+#include <QShortcut>
 
 
 MainWindow::MainWindow(QWidget* parent)
@@ -102,6 +103,7 @@ void MainWindow::setupTableView()
     m_tableView->setModel(m_dataModel);
     m_tableView->setSelectionBehavior(QAbstractItemView::SelectItems);
     m_tableView->setSelectionMode(QAbstractItemView::SingleSelection);
+
     m_tableView->setContextMenuPolicy(Qt::CustomContextMenu);
 
     m_tableView->horizontalHeader()->setDefaultSectionSize(80);
@@ -132,6 +134,8 @@ void MainWindow::setupContextMenu()
     m_contextMenu->addSeparator();
     m_contextMenu->addAction("删除行", this, &MainWindow::onDeleteRow);
     m_contextMenu->addAction("删除列", this, &MainWindow::onDeleteColumn);
+    m_contextMenu->addSeparator();
+    m_contextMenu->addAction("向下填充公式", this, &MainWindow::onFillDownFormula);
 }
 
 void MainWindow::setupFindDialog()
@@ -160,6 +164,112 @@ void MainWindow::setupFindDialog()
     connect(closeBtn, &QPushButton::clicked, m_findDialog, &QDialog::hide);
     connect(m_findLineEdit, &QLineEdit::returnPressed, this, &MainWindow::onFindNext);
 }
+
+void MainWindow::onFillDownFormula()
+{
+    QModelIndex current = m_tableView->currentIndex();
+    if (!current.isValid()) {
+        QMessageBox::information(this, "提示", "请先选中一个单元格");
+        return;
+    }
+
+    int currentRow = current.row();
+    int currentCol = current.column();
+
+    // 1. 检查当前单元格是否有公式
+    const CellData* sourceCell = m_dataModel->getCell(currentRow, currentCol);
+    if (!sourceCell || !sourceCell->hasFormula) {
+        QMessageBox::information(this, "提示", "当前单元格没有公式");
+        return;
+    }
+
+    // 2. 自动判断填充范围
+    int endRow = findFillEndRow(currentRow, currentCol);
+
+    if (endRow <= currentRow) {
+        QMessageBox::information(this, "提示", "未找到可填充的范围（左侧列没有数据）");
+        return;
+    }
+
+    // 3. 确认对话框
+    auto reply = QMessageBox::question(this, "确认填充",
+        QString("是否将公式从第 %1 行填充到第 %2 行？")
+        .arg(currentRow + 1)
+        .arg(endRow + 1),
+        QMessageBox::Yes | QMessageBox::No,
+        QMessageBox::Yes);
+
+    if (reply == QMessageBox::No) {
+        return;
+    }
+
+    // 4. 执行填充
+    QString originalFormula = sourceCell->formula;
+
+    for (int row = currentRow + 1; row <= endRow; row++) {
+        // 调整公式引用
+        QString adjustedFormula = adjustFormulaReferences(originalFormula, row - currentRow);
+
+        QModelIndex targetIndex = m_dataModel->index(row, currentCol);
+        m_dataModel->setData(targetIndex, adjustedFormula, Qt::EditRole);
+    }
+
+    QMessageBox::information(this, "完成",
+        QString("已将公式填充到第 %1 行").arg(endRow + 1));
+}
+
+int MainWindow::findFillEndRow(int currentRow, int currentCol)
+{
+    int maxRow = currentRow;
+    int totalCols = m_dataModel->columnCount();
+
+    // 向左查找相邻的列，找到最后一个有数据的行
+    for (int col = 0; col < currentCol; col++) {
+        // 从当前行开始向下查找，找到该列最后一个非空单元格
+        for (int row = currentRow + 1; row < m_dataModel->rowCount(); row++) {
+            QModelIndex index = m_dataModel->index(row, col);
+            QVariant data = m_dataModel->data(index, Qt::DisplayRole);
+
+            if (!data.isNull() && !data.toString().trimmed().isEmpty()) {
+                maxRow = qMax(maxRow, row);
+            }
+        }
+    }
+
+    return maxRow;
+}
+
+// 工具函数：调整公式中的行引用
+QString MainWindow::adjustFormulaReferences(const QString& formula, int rowOffset)
+{
+    QString result = formula;
+
+    // 匹配 A1 风格的单元格引用（如 B2, C10, AA100）
+    QRegularExpression regex(R"(([A-Z]+)(\d+))");
+    QRegularExpressionMatchIterator it = regex.globalMatch(formula);
+
+    QList<QRegularExpressionMatch> matches;
+    while (it.hasNext()) {
+        matches.append(it.next());
+    }
+
+    // 从后往前替换，避免位置偏移
+    for (int i = matches.size() - 1; i >= 0; --i) {
+        const QRegularExpressionMatch& match = matches[i];
+        QString colPart = match.captured(1);    // 如 "B"
+        QString rowPart = match.captured(2);    // 如 "2"
+
+        int originalRow = rowPart.toInt();
+        int newRow = originalRow + rowOffset;
+
+        QString newCellRef = colPart + QString::number(newRow);
+
+        result.replace(match.capturedStart(), match.capturedLength(), newCellRef);
+    }
+
+    return result;
+}
+
 
 void MainWindow::updateTableSpans()
 {
@@ -196,7 +306,7 @@ void MainWindow::onImportExcel()
 
     if (fileName.isEmpty()) return;
 
-    // ✅ 新增：提取文件名并判断模式
+    // 提取文件名并判断模式
     QFileInfo fileInfo(fileName);
     QString baseFileName = fileInfo.fileName();
 
@@ -206,7 +316,7 @@ void MainWindow::onImportExcel()
 
         // 提取报表名称
         QString reportName = baseFileName.mid(6); // 去掉 "#REPO_"
-        reportName = reportName.left(reportName.lastIndexOf('.'));
+        reportName = reportName.left(reportName.lastIndexOf('.')); 
 
         // 加载报表配置
         if (!m_dataModel->loadReportConfig(fileName)) {
@@ -596,8 +706,6 @@ void MainWindow::applyRowColumnSizes()
     }
 }
 
-
-
 // 新增：刷新数据槽函数（预留）
 void MainWindow::onRefreshData()
 {
@@ -606,7 +714,7 @@ void MainWindow::onRefreshData()
     if (mode == ReportDataModel::REALTIME_MODE) {
         // ========== 实时模式：刷新##绑定数据 ==========
 
-        // ✅ 检查是否有##绑定
+        //  检查是否有##绑定
         if (!m_dataModel->hasDataBindings()) {
             QMessageBox::information(this, "提示",
                 "当前表格中没有数据绑定（##标记的单元格）。\n\n"
@@ -699,7 +807,7 @@ void MainWindow::refreshHistoryReport()
     // 4. 批量查询所有RTU
     TaosDataFetcher fetcher;
     QHash<QString, std::map<int64_t, std::vector<float>>> rawData;
-    QStringList failedRTUs;  // ✅ 记录失败的RTU
+    QStringList failedRTUs;  // 记录失败的RTU
 
     for (int i = 0; i < totalColumns; i++) {
         if (progress.wasCanceled()) {
@@ -735,7 +843,7 @@ void MainWindow::refreshHistoryReport()
             rawData[col.rtuId] = {};
         }
 
-        progress.setValue(10 + i * 70 / totalColumns);
+        progress.setValue(10 + i * 70 / totalColumns); 
         qApp->processEvents();
     }
 
@@ -763,96 +871,3 @@ void MainWindow::refreshHistoryReport()
     }
 }
 
-void MainWindow::refreshDataWithCurrentTime()
-{
-    // 1. 获取全局时间配置
-    const TimeRangeConfig& timeRange = m_globalConfig.globalTimeRange;
-    const QString& defaultRTU = m_globalConfig.defaultRTU;
-
-    // 2. 收集所有需要查询的绑定键
-    QList<QString> allBindingKeys;
-    QHash<QString, QPoint> keyToCellPos;  // 记录绑定键对应的单元格位置
-
-    const auto& allCells = m_dataModel->getAllCells();
-    for (auto it = allCells.constBegin(); it != allCells.constEnd(); ++it) {
-        const CellData* cell = it.value();
-        if (cell && cell->isDataBinding && !cell->bindingKey.isEmpty()) {  // 改为单个bindingKey
-            if (!allBindingKeys.contains(cell->bindingKey)) {
-                allBindingKeys.append(cell->bindingKey);
-            }
-            keyToCellPos.insert(cell->bindingKey, it.key());
-        }
-    }
-
-    if (allBindingKeys.isEmpty()) {
-        QMessageBox::information(this, "提示", "报表中没有数据绑定");
-        return;
-    }
-
-    // 3. 构造TaosDB查询地址并查询
-    QHash<QString, QVariant> results;  // 存储查询结果
-
-    for (const QString& bindingKey : allBindingKeys) {
-        try {
-            // 提取遥测号（去掉##前缀）
-            QString ycno;
-            if (bindingKey.startsWith("##")) {
-                // 简单提取：##TEMP_01 -> TEMP_01
-                // 实际可能需要映射表：TEMP_01 -> AIRTU000100006
-                ycno = defaultRTU;  // 暂时使用默认RTU
-            }
-
-            // 构造查询地址
-            QString taosAddress = QString("%1@%2~%3#%4")
-                .arg(ycno)
-                .arg(timeRange.startTime.toString("yyyy-MM-dd HH:mm:ss"))
-                .arg(timeRange.endTime.toString("yyyy-MM-dd HH:mm:ss"))
-                .arg(timeRange.intervalSeconds);
-
-            // 查询数据
-            TaosDataFetcher fetcher;
-            auto data = fetcher.fetchDataFromAddress(taosAddress.toStdString());
-
-            // 取最新值（或计算平均值/最大值等）
-            if (!data.empty()) {
-                // 获取最后一个时间点的值
-                auto lastEntry = data.rbegin();
-                if (!lastEntry->second.empty()) {
-                    float value = lastEntry->second[0];
-                    results[bindingKey] = value;
-                }
-                else {
-                    results[bindingKey] = "无数据";
-                }
-            }
-            else {
-                results[bindingKey] = "无数据";
-            }
-
-        }
-        catch (const std::exception& e) {
-            results[bindingKey] = QString("查询失败: %1").arg(e.what());
-        }
-    }
-
-    // 4. 更新单元格数据
-    int successCount = 0;
-    for (auto it = results.constBegin(); it != results.constEnd(); ++it) {
-        QPoint pos = keyToCellPos.value(it.key());
-        CellData* cell = m_dataModel->getCell(pos.x(), pos.y());
-        if (cell) {
-            cell->value = it.value();
-            successCount++;
-        }
-    }
-
-    // 5. 刷新视图
-    m_dataModel->dataChanged(
-        m_dataModel->index(0, 0),
-        m_dataModel->index(m_dataModel->rowCount() - 1, m_dataModel->columnCount() - 1)
-    );
-
-    // 6. 提示结果
-    QMessageBox::information(this, "刷新完成",
-        QString("成功更新 %1 个数据绑定单元格").arg(successCount));
-}

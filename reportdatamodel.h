@@ -50,7 +50,7 @@ public:
     bool hasHistoryData() const { return !m_fullTimeAxis.isEmpty(); }
     QString getReportName() const { return m_reportName; }
     const HistoryReportConfig& getHistoryConfig() const { return m_historyConfig; }
-    bool hasDataBindings() const;  // ✅ 检查是否有##绑定
+    bool hasDataBindings() const;  //  检查是否有##绑定
 
     //  添加静态工具函数
     static QVector<QDateTime> generateTimeAxis(const TimeRangeConfig& config);

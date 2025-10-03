@@ -21,6 +21,7 @@
 #include <QDebug>              // 用于 qDebug
 #include <limits>              // 用于 std::numeric_limits
 #include <cmath>               // 用于 std::isnan, std::isinf
+#include <QMessageBox>
 
 
 ReportDataModel::ReportDataModel(QObject* parent)
@@ -263,7 +264,7 @@ QVariant ReportDataModel::getHistoryReportCellData(const QModelIndex& index, int
 void ReportDataModel::setWorkMode(WorkMode mode)
 {
     if (m_currentMode != mode) {
-        // 新增：切换模式时清理对方模式的数据
+        // 切换模式时清理对方模式的数据
         if (mode == HISTORY_MODE) {
             // 切换到报表模式，清理实时模式数据
             if (!m_cells.isEmpty()) {
@@ -313,7 +314,7 @@ bool ReportDataModel::loadReportConfig(const QString& filePath)
     QXlsx::Worksheet* sheet = static_cast<QXlsx::Worksheet*>(xlsx.currentSheet());
     if (!sheet) return false;
 
-    const QXlsx::CellRange range = sheet->dimension();
+    const QXlsx::CellRange range = sheet->dimension(); 
     if (!range.isValid()) return false;
 
     // 清空旧配置
@@ -344,8 +345,8 @@ bool ReportDataModel::loadReportConfig(const QString& filePath)
             continue;
         }
 
-        ReportColumnConfig colConfig;
-        colConfig.displayName = colA.toString().trimmed();
+        ReportColumnConfig colConfig; 
+        colConfig.displayName = colA.toString().trimmed(); 
         colConfig.rtuId = colB.toString().trimmed();
         colConfig.sourceRow = row - 1;
 
@@ -391,25 +392,29 @@ void ReportDataModel::generateHistoryReport(
 {
     beginResetModel();
 
-    // 清空旧的实时模式数据
     if (!m_cells.isEmpty()) {
         qDeleteAll(m_cells);
         m_cells.clear();
     }
 
-    // 存储报表数据
     m_historyConfig = config;
     m_fullTimeAxis = timeAxis;
     m_fullAlignedData = alignedData;
 
-    // 更新模型尺寸
-    int totalRows = timeAxis.size() + 1; // +1 表头
-    int totalCols = config.columns.size() + 1; // +1 时间列
+    // 记录数据列的索引（时间列 + 所有RTU数据列）
+    m_historyConfig.dataColumns.clear();
+    m_historyConfig.dataColumns.insert(0);  // 时间列
+    for (int i = 0; i < config.columns.size(); i++) {
+        m_historyConfig.dataColumns.insert(i + 1);  // RTU数据列
+    }
+
+    int totalRows = timeAxis.size() + 1;
+    int totalCols = config.columns.size() + 1;
     updateModelSize(totalRows, totalCols);
 
     endResetModel();
 
-    qDebug() << "报表已生成：" << totalRows << "行 x" << totalCols << "列";
+    qDebug() << "报表已生成，数据列索引：" << m_historyConfig.dataColumns;
 }
 
 //  生成时间轴（静态函数）
@@ -422,9 +427,9 @@ QVector<QDateTime> ReportDataModel::generateTimeAxis(const TimeRangeConfig& conf
         return timeAxis;
     }
 
-    QDateTime current = config.startTime;
+    QDateTime current = config.startTime; 
 
-    qint64 totalSeconds = config.startTime.secsTo(config.endTime);
+    qint64 totalSeconds = config.startTime.secsTo(config.endTime); //
     int estimatedSize = totalSeconds / config.intervalSeconds + 1;
     timeAxis.reserve(estimatedSize);
 
@@ -458,23 +463,27 @@ QHash<QString, QVector<double>> ReportDataModel::alignDataWithInterpolation(
         }
 
         for (const QDateTime& targetTime : timeAxis) {
-            qint64 targetTs = targetTime.toMSecsSinceEpoch() / 1000;
+            qint64 targetTs = targetTime.toSecsSinceEpoch();  //  直接用秒
 
             auto upper = dataMap.lower_bound(targetTs);
+
+            //  判断是否完美匹配
+            if (upper != dataMap.end() && upper->first == targetTs) {
+                // 完美匹配，直接使用值，无需插值
+                alignedValues.append(static_cast<double>(upper->second[0]));
+                continue;
+            }
+
+            // 以下是原有的插值逻辑
             if (upper == dataMap.end()) {
-                // 目标时间在所有数据之后
                 float lastValue = dataMap.rbegin()->second[0];
                 alignedValues.append(static_cast<double>(lastValue));
-
             }
             else if (upper == dataMap.begin()) {
-                // 目标时间在所有数据之前
                 float firstValue = upper->second[0];
                 alignedValues.append(static_cast<double>(firstValue));
-
             }
             else {
-                // 线性插值
                 qint64 t2 = upper->first;
                 float v2 = upper->second[0];
 
@@ -486,6 +495,7 @@ QHash<QString, QVector<double>> ReportDataModel::alignDataWithInterpolation(
                     alignedValues.append(static_cast<double>(v1));
                 }
                 else {
+                    // 线性插值
                     double ratio = static_cast<double>(targetTs - t1) / (t2 - t1);
                     double interpolated = v1 + (v2 - v1) * ratio;
                     alignedValues.append(interpolated);
@@ -608,9 +618,68 @@ bool ReportDataModel::setData(const QModelIndex& index, const QVariant& value, i
         return false;
 
     if (m_currentMode == HISTORY_MODE) {
-        qWarning() << "历史报表模式下不允许编辑单元格";
-        return false;
+        if (m_fullTimeAxis.isEmpty()) {
+            // ===== 配置阶段：直接修改配置数据 =====
+
+            int row = index.row();
+            int col = index.column();
+
+            // 确保配置有足够的行
+            while (row >= m_historyConfig.columns.size()) {
+                ReportColumnConfig newConfig;
+                m_historyConfig.columns.append(newConfig);
+                // 动态扩展模型行数
+                beginInsertRows(QModelIndex(), m_historyConfig.columns.size() - 1,
+                    m_historyConfig.columns.size() - 1);
+                m_maxRow = m_historyConfig.columns.size();
+                endInsertRows();
+            }
+
+            // 修改配置
+            if (col == 0) {
+                m_historyConfig.columns[row].displayName = value.toString().trimmed();
+            }
+            else if (col == 1) {
+                m_historyConfig.columns[row].rtuId = value.toString().trimmed();
+            }
+
+            emit dataChanged(index, index, { role });
+            return true;
+        }
+        else {
+            // ===== 报表阶段：只允许编辑公式列 =====
+
+            // 表头不可编辑
+            if (index.row() == 0) {
+                qWarning() << "表头不可编辑";
+                return false;
+            }
+
+            // 数据列不可编辑
+            if (m_historyConfig.dataColumns.contains(index.column())) {
+                QMessageBox::warning(nullptr, "提示", "数据列为只读，请在右侧空白列添加公式。");
+                return false;
+            }
+
+            // 公式列可编辑
+            CellData* cell = ensureCell(index.row(), index.column());
+            if (!cell) return false;
+
+            QString text = value.toString();
+
+            if (text.startsWith('=')) {
+                cell->setFormula(text);
+                calculateFormula(index.row(), index.column());
+            }
+            else {
+                cell->value = value;
+            }
+
+            emit dataChanged(index, index, { role });
+            return true;
+        }
     }
+
 
     CellData* cell = ensureCell(index.row(), index.column());
     if (!cell) return false;
@@ -654,7 +723,28 @@ Qt::ItemFlags ReportDataModel::flags(const QModelIndex& index) const
         return Qt::NoItemFlags;
 
     if (m_currentMode == HISTORY_MODE) {
-        return Qt::ItemIsEnabled | Qt::ItemIsSelectable;
+        // ===== 判断当前是配置阶段还是报表阶段 =====
+        if (m_fullTimeAxis.isEmpty()) {
+            // 配置阶段：所有单元格可编辑
+            return Qt::ItemIsEnabled | Qt::ItemIsSelectable | Qt::ItemIsEditable;
+        }
+        else {
+            // 报表阶段：
+            // - 表头只读
+            // - 数据列只读
+            // - 公式列可编辑
+            if (index.row() == 0) {
+                return Qt::ItemIsEnabled | Qt::ItemIsSelectable;  // 表头只读
+            }
+
+            //  判断是否为数据列
+            if (m_historyConfig.dataColumns.contains(index.column())) {
+                return Qt::ItemIsEnabled | Qt::ItemIsSelectable;  // 数据列只读
+            }
+
+            // 公式列可编辑
+            return Qt::ItemIsEnabled | Qt::ItemIsSelectable | Qt::ItemIsEditable;
+        }
     }
 
     // 检查是否是合并单元格的从属单元格

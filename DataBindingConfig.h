@@ -6,32 +6,8 @@
 #include <QString>
 #include <QVariant>
 #include <QFont>
+#include <QSet>
 #include <QColor>
-
-// ===== 时间范围配置 =====
-struct TimeRangeConfig {
-    QDateTime startTime;
-    QDateTime endTime;
-    int intervalSeconds;
-
-    TimeRangeConfig()
-        : intervalSeconds(300)
-    {
-        QDateTime now = QDateTime::currentDateTime();
-        startTime = QDateTime(now.date(), QTime(0, 0, 0));
-        endTime = now;
-    }
-
-    TimeRangeConfig(const QDateTime& start, const QDateTime& end, int interval)
-        : startTime(start), endTime(end), intervalSeconds(interval)
-    {
-    }
-
-    bool isValid() const {
-        return startTime.isValid() && endTime.isValid()
-            && startTime < endTime && intervalSeconds > 0;
-    }
-};
 
 // ===== 样式结构（从Cell.h移过来） =====
 enum class RTBorderStyle {
@@ -140,6 +116,31 @@ struct CellData {
     }
 };
 
+// ===== 时间范围配置 =====
+struct TimeRangeConfig {
+    QDateTime startTime;
+    QDateTime endTime;
+    int intervalSeconds;
+
+    TimeRangeConfig()
+        : intervalSeconds(300)
+    {
+        QDateTime now = QDateTime::currentDateTime();
+        startTime = QDateTime(now.date(), QTime(0, 0, 0));
+        endTime = now;
+    }
+
+    TimeRangeConfig(const QDateTime& start, const QDateTime& end, int interval)
+        : startTime(start), endTime(end), intervalSeconds(interval)
+    {
+    }
+
+    bool isValid() const {
+        return startTime.isValid() && endTime.isValid()
+            && startTime < endTime && intervalSeconds > 0;
+    }
+};
+
 // ===== 全局配置 =====
 struct GlobalDataConfig {
     TimeRangeConfig globalTimeRange;  // 全局时间范围
@@ -166,7 +167,11 @@ struct HistoryReportConfig {
     QString reportName;      // 报表名称
     QString configFilePath;  // 配置文件路径
 
+    // 记录哪些列是数据列（只读）
+    QSet<int> dataColumns;  // 存储数据列的列索引
+
     HistoryReportConfig() {}
 };
+
 
 #endif // DATABINDINGCONFIG_H

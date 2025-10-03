@@ -51,6 +51,8 @@ private slots:
 
     void onRefreshData();  // 保留，但实现会改变
 
+    void onFillDownFormula();
+
 
 private:
     void setupUI();
@@ -66,11 +68,13 @@ private:
     bool isInFormulaEditMode() const;
     void updateTableSpans();
 
-    void applyRowColumnSizes(); // <-- 新增这个函数声明
-
-    void refreshDataWithCurrentTime();
+    void applyRowColumnSizes();
 
     void refreshHistoryReport();
+
+    QString adjustFormulaReferences(const QString& formula, int rowOffset);
+
+    int findFillEndRow(int currentRow, int currentCol);
 
 private:
     // UI组件

@@ -116,7 +116,7 @@ bool TaosDataFetcher::parseAddress(const std::string& address,
     }
     else {
         // 没有时间间隔
-        startTime = address.substr(atPos + 1, tildePos - atPos - 1);
+        startTime = address.substr(atPos + 1, tildePos - atPos - 1); 
         endTime = address.substr(tildePos + 1);
     }
 
