@@ -1,6 +1,12 @@
 ﻿#include "reportdatamodel.h"
 #include "formulaengine.h"
 #include "excelhandler.h" // 用于文件操作
+#include "UniversalQueryEngine.h"
+// QXlsx相关（检查是否已包含）
+#include "xlsxdocument.h"      // 用于 QXlsx::Document
+#include "xlsxcellrange.h"     // 用于 QXlsx::CellRange
+#include "xlsxworksheet.h"     // 用于 QXlsx::Worksheet
+#include "xlsxformat.h"        // 用于 QXlsx::Format
 
 #include <QColor>
 #include <QFont>
@@ -8,11 +14,18 @@
 #include <QHash>
 #include <QBrush>
 #include <QPen>
-#include "UniversalQueryEngine.h"
+#include <QFileInfo>           // 用于 QFileInfo
+#include <QVariant>            // 用于 QVariant（可能已有）
+#include <QProgressDialog>     // 用于 QProgressDialog
+#include <QApplication>        // 用于 qApp
+#include <QDebug>              // 用于 qDebug
+#include <limits>              // 用于 std::numeric_limits
+#include <cmath>               // 用于 std::isnan, std::isinf
 
 
 ReportDataModel::ReportDataModel(QObject* parent)
     : QAbstractTableModel(parent)
+    , m_currentMode(REALTIME_MODE)
     , m_maxRow(100) // 默认初始行数
     , m_maxCol(26)  // 默认初始列数 (A-Z)
     , m_formulaEngine(new FormulaEngine(this))
@@ -100,11 +113,23 @@ QVariant ReportDataModel::data(const QModelIndex& index, int role) const
     if (!index.isValid())
         return QVariant();
 
+    //  根据当前模式分发
+    if (m_currentMode == HISTORY_MODE) {
+        return getHistoryReportCellData(index, role);
+    }
+    else {
+        return getRealtimeCellData(index, role);
+    }
+}
+
+QVariant ReportDataModel::getRealtimeCellData(const QModelIndex& index, int role) const
+{
+    // ✅ 将原来data()函数中的实时模式逻辑全部移到这里
     const CellData* cell = getCell(index.row(), index.column());
     if (!cell)
         return QVariant();
 
-    // 对于合并单元格处理
+    // 合并单元格处理
     if (cell->mergedRange.isValid() && cell->mergedRange.isMerged()) {
         bool isMainCell = (index.row() == cell->mergedRange.startRow &&
             index.column() == cell->mergedRange.startCol);
@@ -149,10 +174,443 @@ QVariant ReportDataModel::data(const QModelIndex& index, int role) const
     }
 }
 
+QVariant ReportDataModel::getHistoryReportCellData(const QModelIndex& index, int role) const
+{
+    int row = index.row();
+    int col = index.column();
+
+    // 判断当前是显示配置还是报表数据
+    if (m_fullTimeAxis.isEmpty()) {
+        // ========== 显示配置文件内容（2列） ==========
+        if (role == Qt::DisplayRole || role == Qt::EditRole) {
+            if (row >= m_historyConfig.columns.size()) return QVariant();
+
+            const ReportColumnConfig& config = m_historyConfig.columns[row];
+            if (col == 0) return config.displayName;
+            if (col == 1) return config.rtuId;
+        }
+
+        if (role == Qt::BackgroundRole) {
+            return QBrush(QColor(250, 250, 250));
+        }
+
+        if (role == Qt::TextAlignmentRole) {
+            return (int)(Qt::AlignVCenter | Qt::AlignLeft);
+        }
+
+    }
+    else {
+        // ========== 显示报表数据 ==========
+        if (role == Qt::DisplayRole || role == Qt::EditRole) {
+            // 表头行
+            if (row == 0) {
+                if (col == 0) return "时间";
+                if (col - 1 < m_historyConfig.columns.size()) {
+                    return m_historyConfig.columns[col - 1].displayName;
+                }
+                return QVariant();
+            }
+
+            // 数据行
+            int dataRow = row - 1;
+            if (dataRow >= 0 && dataRow < m_fullTimeAxis.size()) {
+                if (col == 0) {
+                    // 时间列
+                    return m_fullTimeAxis[dataRow].toString("yyyy-MM-dd HH:mm:ss");
+                }
+                else if (col - 1 < m_historyConfig.columns.size()) {
+                    // 数据列
+                    QString rtuId = m_historyConfig.columns[col - 1].rtuId;
+                    if (m_fullAlignedData.contains(rtuId)) {
+                        const QVector<double>& values = m_fullAlignedData[rtuId];
+                        if (dataRow < values.size()) {
+                            double value = values[dataRow];
+                            if (std::isnan(value) || std::isinf(value)) {
+                                return "N/A";
+                            }
+                            return QString::number(value, 'f', 2);
+                        }
+                    }
+                    return "N/A";
+                }
+            }
+        }
+
+        if (role == Qt::TextAlignmentRole) {
+            return (int)(Qt::AlignVCenter | Qt::AlignLeft);
+        }
+
+        if (role == Qt::BackgroundRole) {
+            if (row == 0) {
+                return QBrush(QColor(220, 220, 220)); // 表头灰色
+            }
+            else {
+                return (row % 2 == 0) ? QBrush(Qt::white) : QBrush(QColor(248, 248, 248)); // 斑马纹
+            }
+        }
+
+        if (role == Qt::FontRole) {
+            QFont font;
+            if (row == 0) font.setBold(true);
+            return font;
+        }
+    }
+
+    return QVariant();
+}
+
+//  设置工作模式
+void ReportDataModel::setWorkMode(WorkMode mode)
+{
+    if (m_currentMode != mode) {
+        // 新增：切换模式时清理对方模式的数据
+        if (mode == HISTORY_MODE) {
+            // 切换到报表模式，清理实时模式数据
+            if (!m_cells.isEmpty()) {
+                qDeleteAll(m_cells);
+                m_cells.clear();
+                qDebug() << "已清理实时模式数据";
+            }
+        }
+        else {
+            // 切换到实时模式，清理报表数据
+            if (!m_fullTimeAxis.isEmpty() || !m_fullAlignedData.isEmpty()) {
+                m_fullTimeAxis.clear();
+                m_fullAlignedData.clear();
+                m_historyConfig.columns.clear();
+                m_historyConfig.reportName.clear();
+                m_historyConfig.configFilePath.clear();
+                m_reportName.clear();
+                qDebug() << "已清理报表模式数据";
+            }
+        }
+
+        m_currentMode = mode;
+        qDebug() << "切换工作模式：" << (mode == REALTIME_MODE ? "实时模式" : "历史模式");
+    }
+}
+
+//  检查是否有##绑定
+bool ReportDataModel::hasDataBindings() const
+{
+    for (auto it = m_cells.constBegin(); it != m_cells.constEnd(); ++it) {
+        if (it.value() && it.value()->isDataBinding) {
+            return true;
+        }
+    }
+    return false;
+}
+
+//  加载报表配置
+bool ReportDataModel::loadReportConfig(const QString& filePath)
+{
+    QXlsx::Document xlsx(filePath);
+    if (!xlsx.load()) {
+        qWarning() << "无法打开配置文件:" << filePath;
+        return false;
+    }
+
+    QXlsx::Worksheet* sheet = static_cast<QXlsx::Worksheet*>(xlsx.currentSheet());
+    if (!sheet) return false;
+
+    const QXlsx::CellRange range = sheet->dimension();
+    if (!range.isValid()) return false;
+
+    // 清空旧配置
+    m_historyConfig.columns.clear();
+
+    // 从文件名提取报表名称
+    QFileInfo fileInfo(filePath);
+    QString fileName = fileInfo.fileName();
+    m_reportName = fileName.mid(6); // 去掉"#REPO_"
+    m_reportName = m_reportName.left(m_reportName.lastIndexOf('.'));
+
+    m_historyConfig.reportName = m_reportName;
+    m_historyConfig.configFilePath = filePath;
+
+    // 解析配置数据
+    for (int row = range.firstRow(); row <= range.lastRow(); ++row) {
+        QVariant colA = sheet->read(row, 1); // A列
+        QVariant colB = sheet->read(row, 2); // B列
+
+        // 跳过空行
+        if (colA.isNull() && colB.isNull()) continue;
+        if (colA.toString().trimmed().isEmpty() &&
+            colB.toString().trimmed().isEmpty()) continue;
+
+        // 验证完整性
+        if (colA.isNull() || colB.isNull()) {
+            qWarning() << "配置文件第" << row << "行数据不完整";
+            continue;
+        }
+
+        ReportColumnConfig colConfig;
+        colConfig.displayName = colA.toString().trimmed();
+        colConfig.rtuId = colB.toString().trimmed();
+        colConfig.sourceRow = row - 1;
+
+        if (colConfig.rtuId.isEmpty()) {
+            qWarning() << "配置文件第" << row << "行RTU号为空";
+            continue;
+        }
+
+        m_historyConfig.columns.append(colConfig);
+    }
+
+    if (m_historyConfig.columns.isEmpty()) {
+        qWarning() << "配置文件中没有有效的列配置";
+        return false;
+    }
+
+    qDebug() << "成功加载报表配置：" << m_reportName
+        << "，共" << m_historyConfig.columns.size() << "列";
+
+    return true;
+}
+
+//  显示配置文件内容
+void ReportDataModel::displayConfigFileContent()
+{
+    beginResetModel();
+
+    clearAllCells();
+    m_fullTimeAxis.clear();
+    m_fullAlignedData.clear();
+
+    int rowCount = m_historyConfig.columns.size();
+    updateModelSize(rowCount, 2); // 2列：名称+RTU号
+
+    endResetModel();
+}
+
+//  生成历史报表
+void ReportDataModel::generateHistoryReport(
+    const HistoryReportConfig& config,
+    const QHash<QString, QVector<double>>& alignedData,
+    const QVector<QDateTime>& timeAxis)
+{
+    beginResetModel();
+
+    // 清空旧的实时模式数据
+    if (!m_cells.isEmpty()) {
+        qDeleteAll(m_cells);
+        m_cells.clear();
+    }
+
+    // 存储报表数据
+    m_historyConfig = config;
+    m_fullTimeAxis = timeAxis;
+    m_fullAlignedData = alignedData;
+
+    // 更新模型尺寸
+    int totalRows = timeAxis.size() + 1; // +1 表头
+    int totalCols = config.columns.size() + 1; // +1 时间列
+    updateModelSize(totalRows, totalCols);
+
+    endResetModel();
+
+    qDebug() << "报表已生成：" << totalRows << "行 x" << totalCols << "列";
+}
+
+//  生成时间轴（静态函数）
+QVector<QDateTime> ReportDataModel::generateTimeAxis(const TimeRangeConfig& config)
+{
+    QVector<QDateTime> timeAxis;
+
+    if (!config.isValid()) {
+        qWarning() << "时间配置无效";
+        return timeAxis;
+    }
+
+    QDateTime current = config.startTime;
+
+    qint64 totalSeconds = config.startTime.secsTo(config.endTime);
+    int estimatedSize = totalSeconds / config.intervalSeconds + 1;
+    timeAxis.reserve(estimatedSize);
+
+    while (current <= config.endTime) {
+        timeAxis.append(current);
+        current = current.addSecs(config.intervalSeconds);
+    }
+
+    qDebug() << "生成时间轴：" << timeAxis.size() << "个时间点";
+    return timeAxis;
+}
+
+//  线性插值对齐（静态函数）
+QHash<QString, QVector<double>> ReportDataModel::alignDataWithInterpolation(
+    const QHash<QString, std::map<int64_t, std::vector<float>>>& rawData,
+    const QVector<QDateTime>& timeAxis)
+{
+    QHash<QString, QVector<double>> result;
+
+    for (auto it = rawData.constBegin(); it != rawData.constEnd(); ++it) {
+        QString rtuId = it.key();
+        const std::map<int64_t, std::vector<float>>& dataMap = it.value();
+
+        QVector<double> alignedValues;
+        alignedValues.reserve(timeAxis.size());
+
+        if (dataMap.empty()) {
+            alignedValues.fill(std::numeric_limits<double>::quiet_NaN(), timeAxis.size());
+            result[rtuId] = alignedValues;
+            continue;
+        }
+
+        for (const QDateTime& targetTime : timeAxis) {
+            qint64 targetTs = targetTime.toMSecsSinceEpoch() / 1000;
+
+            auto upper = dataMap.lower_bound(targetTs);
+            if (upper == dataMap.end()) {
+                // 目标时间在所有数据之后
+                float lastValue = dataMap.rbegin()->second[0];
+                alignedValues.append(static_cast<double>(lastValue));
+
+            }
+            else if (upper == dataMap.begin()) {
+                // 目标时间在所有数据之前
+                float firstValue = upper->second[0];
+                alignedValues.append(static_cast<double>(firstValue));
+
+            }
+            else {
+                // 线性插值
+                qint64 t2 = upper->first;
+                float v2 = upper->second[0];
+
+                auto lower = std::prev(upper);
+                qint64 t1 = lower->first;
+                float v1 = lower->second[0];
+
+                if (t2 == t1) {
+                    alignedValues.append(static_cast<double>(v1));
+                }
+                else {
+                    double ratio = static_cast<double>(targetTs - t1) / (t2 - t1);
+                    double interpolated = v1 + (v2 - v1) * ratio;
+                    alignedValues.append(interpolated);
+                }
+            }
+        }
+
+        result[rtuId] = alignedValues;
+    }
+
+    return result;
+}
+
+bool ReportDataModel::exportHistoryReportToExcel(
+    const QString& fileName,
+    QProgressDialog* progress)
+{
+    if (!hasHistoryData()) {
+        qWarning() << "没有可导出的报表数据";
+        return false;
+    }
+
+    QXlsx::Document xlsx;
+    QXlsx::Worksheet* sheet = xlsx.currentWorksheet();
+
+    int totalRows = m_fullTimeAxis.size();
+    int totalCols = m_historyConfig.columns.size();
+
+    // 1. 设置列宽
+    sheet->setColumnWidth(1, 1, 20.0);  // 时间列
+    for (int col = 2; col <= totalCols + 1; col++) {
+        sheet->setColumnWidth(col, col, 15.0);
+    }
+
+    // 2. 写入表头
+    QXlsx::Format headerFormat;
+    headerFormat.setFontBold(true);
+    headerFormat.setFontSize(11);
+    headerFormat.setPatternBackgroundColor(QColor(220, 220, 220));
+    headerFormat.setHorizontalAlignment(QXlsx::Format::AlignHCenter);
+    headerFormat.setVerticalAlignment(QXlsx::Format::AlignVCenter);
+
+    sheet->write(1, 1, "时间", headerFormat);
+    for (int col = 0; col < totalCols; col++) {
+        sheet->write(1, col + 2, m_historyConfig.columns[col].displayName, headerFormat);
+    }
+
+    if (progress) {
+        progress->setValue(5);
+        qApp->processEvents();
+    }
+
+    // 3. 写入数据
+    QXlsx::Format dataFormat;
+    dataFormat.setFontSize(10);
+    dataFormat.setVerticalAlignment(QXlsx::Format::AlignVCenter);
+
+    for (int row = 0; row < totalRows; row++) {
+        if (progress && progress->wasCanceled()) {
+            qDebug() << "用户取消导出";
+            return false;
+        }
+
+        // 时间列
+        QString timeStr = m_fullTimeAxis[row].toString("yyyy-MM-dd HH:mm:ss");
+        sheet->write(row + 2, 1, timeStr, dataFormat);
+
+        // 数据列
+        for (int col = 0; col < totalCols; col++) {
+            QString rtuId = m_historyConfig.columns[col].rtuId;
+
+            if (m_fullAlignedData.contains(rtuId) &&
+                row < m_fullAlignedData[rtuId].size()) {
+                double value = m_fullAlignedData[rtuId][row];
+
+                if (std::isnan(value) || std::isinf(value)) {
+                    sheet->write(row + 2, col + 2, "N/A", dataFormat);
+                }
+                else {
+                    sheet->write(row + 2, col + 2, value, dataFormat);
+                }
+            }
+            else {
+                sheet->write(row + 2, col + 2, "N/A", dataFormat);
+            }
+        }
+
+        // 每100行更新一次进度
+        if (progress && row % 100 == 0) {
+            int progressValue = 5 + (row * 90 / totalRows);
+            progress->setValue(progressValue);
+            qApp->processEvents();
+        }
+    }
+
+    if (progress) {
+        progress->setValue(95);
+        qApp->processEvents();
+    }
+
+    // 4. 保存文件
+    bool success = xlsx.saveAs(fileName);
+
+    if (progress) progress->setValue(100);
+
+    if (success) {
+        qDebug() << "成功导出报表到：" << fileName;
+    }
+    else {
+        qWarning() << "导出失败：" << fileName;
+    }
+
+    return success;
+}
+
+
 bool ReportDataModel::setData(const QModelIndex& index, const QVariant& value, int role)
 {
     if (!index.isValid() || role != Qt::EditRole)
         return false;
+
+    if (m_currentMode == HISTORY_MODE) {
+        qWarning() << "历史报表模式下不允许编辑单元格";
+        return false;
+    }
 
     CellData* cell = ensureCell(index.row(), index.column());
     if (!cell) return false;
@@ -194,6 +652,10 @@ Qt::ItemFlags ReportDataModel::flags(const QModelIndex& index) const
 {
     if (!index.isValid())
         return Qt::NoItemFlags;
+
+    if (m_currentMode == HISTORY_MODE) {
+        return Qt::ItemIsEnabled | Qt::ItemIsSelectable;
+    }
 
     // 检查是否是合并单元格的从属单元格
     const CellData* cell = getCell(index.row(), index.column());

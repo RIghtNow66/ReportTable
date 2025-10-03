@@ -151,4 +151,22 @@ struct GlobalDataConfig {
     }
 };
 
+// 报表列配置
+struct ReportColumnConfig {
+    QString displayName;     // 显示名称
+    QString rtuId;           // RTU号
+    int sourceRow;           // 配置文件中的行号
+
+    ReportColumnConfig() : sourceRow(-1) {}
+};
+
+// 历史报表配置
+struct HistoryReportConfig {
+    QVector<ReportColumnConfig> columns;
+    QString reportName;      // 报表名称
+    QString configFilePath;  // 配置文件路径
+
+    HistoryReportConfig() {}
+};
+
 #endif // DATABINDINGCONFIG_H

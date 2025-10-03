@@ -49,8 +49,8 @@ private slots:
     void onDeleteRow();
     void onDeleteColumn();
 
-    void onTimeSettings();
-    void onRefreshData();  // 新增：刷新数据
+    void onRefreshData();  // 保留，但实现会改变
+
 
 private:
     void setupUI();
@@ -69,6 +69,8 @@ private:
     void applyRowColumnSizes(); // <-- 新增这个函数声明
 
     void refreshDataWithCurrentTime();
+
+    void refreshHistoryReport();
 
 private:
     // UI组件
@@ -101,10 +103,6 @@ private:
     bool m_formulaEditMode; // 新增：标识是否在公式编辑模式
     QModelIndex m_formulaEditingIndex; // 新增：记录正在编辑公式的单元格
 
-    // 新增：时间设置相关
-    QDateTime m_currentStartTime;
-    QDateTime m_currentEndTime;
-    int m_currentInterval;
 
     GlobalDataConfig m_globalConfig;  // 全局配置
 };

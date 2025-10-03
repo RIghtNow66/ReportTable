@@ -10,6 +10,7 @@
 #include <QPoint>
 #include <QSize>
 #include <QVector> 
+#include <QProgressDialog>
 
 // qHash 函数必须在 QHash 使用之前定义
 inline uint qHash(const QPoint& key, uint seed = 0) noexcept
@@ -26,6 +27,37 @@ class ReportDataModel : public QAbstractTableModel
 public:
     explicit ReportDataModel(QObject* parent = nullptr);
     ~ReportDataModel();
+
+    enum WorkMode {
+        REALTIME_MODE,    // 实时单元格绑定模式
+        HISTORY_MODE      // 历史报表生成模式
+    };
+
+    //  添加模式管理接口
+    void setWorkMode(WorkMode mode);
+    WorkMode currentMode() const { return m_currentMode; }
+    bool isHistoryMode() const { return m_currentMode == HISTORY_MODE; }
+
+    //  添加历史模式接口
+    bool loadReportConfig(const QString& filePath);
+    void displayConfigFileContent();
+    void generateHistoryReport(
+        const HistoryReportConfig& config,
+        const QHash<QString, QVector<double>>& alignedData,
+        const QVector<QDateTime>& timeAxis
+    );
+    bool exportHistoryReportToExcel(const QString& fileName, QProgressDialog* progress = nullptr);
+    bool hasHistoryData() const { return !m_fullTimeAxis.isEmpty(); }
+    QString getReportName() const { return m_reportName; }
+    const HistoryReportConfig& getHistoryConfig() const { return m_historyConfig; }
+    bool hasDataBindings() const;  // ✅ 检查是否有##绑定
+
+    //  添加静态工具函数
+    static QVector<QDateTime> generateTimeAxis(const TimeRangeConfig& config);
+    static QHash<QString, QVector<double>> alignDataWithInterpolation(
+        const QHash<QString, std::map<int64_t, std::vector<float>>>& rawData,
+        const QVector<QDateTime>& timeAxis
+    );
 
     // Qt Model 接口
     int rowCount(const QModelIndex& parent = QModelIndex()) const override;
@@ -77,6 +109,10 @@ public:
 
     QFont ensureFontAvailable(const QFont& requestedFont) const;
 
+private:
+    QVariant getRealtimeCellData(const QModelIndex& index, int role) const;
+    QVariant getHistoryReportCellData(const QModelIndex& index, int role) const;
+
 signals:
     void cellChanged(int row, int col);
 
@@ -89,6 +125,12 @@ private:
     QVector<double> m_columnWidths;
 
     GlobalDataConfig m_globalConfig;         // 全局配置
+
+    WorkMode m_currentMode;                                   // 当前工作模式
+    QString m_reportName;                                     // 报表名称
+    HistoryReportConfig m_historyConfig;                      // 报表配置
+    QVector<QDateTime> m_fullTimeAxis;                        // 完整时间轴
+    QHash<QString, QVector<double>> m_fullAlignedData;        // 对齐后的数据
 };
 
 #endif // REPORTDATAMODEL_H
