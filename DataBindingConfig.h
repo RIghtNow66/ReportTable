@@ -168,7 +168,7 @@ struct HistoryReportConfig {
     QString configFilePath;  // 配置文件路径
 
     // 记录哪些列是数据列（只读）
-    QSet<int> dataColumns;  // 存储数据列的列索引
+    QSet<int> dataColumns;  // 存储数据列的列索引dataColumns 
 
     HistoryReportConfig() {}
 };

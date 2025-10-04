@@ -16,6 +16,7 @@
 #include <QFileInfo>
 #include <QDebug>
 #include <QShortcut>
+#include <QRegularExpression> 
 
 
 MainWindow::MainWindow(QWidget* parent)
@@ -244,8 +245,8 @@ QString MainWindow::adjustFormulaReferences(const QString& formula, int rowOffse
 {
     QString result = formula;
 
-    // 匹配 A1 风格的单元格引用（如 B2, C10, AA100）
-    QRegularExpression regex(R"(([A-Z]+)(\d+))");
+    // 匹配单元格引用：支持 $A$1, $A1, A$1, A1
+    QRegularExpression regex(R"((\$?)([A-Z]+)(\$?)(\d+))");
     QRegularExpressionMatchIterator it = regex.globalMatch(formula);
 
     QList<QRegularExpressionMatch> matches;
@@ -253,16 +254,20 @@ QString MainWindow::adjustFormulaReferences(const QString& formula, int rowOffse
         matches.append(it.next());
     }
 
-    // 从后往前替换，避免位置偏移
+    // 从后往前替换
     for (int i = matches.size() - 1; i >= 0; --i) {
         const QRegularExpressionMatch& match = matches[i];
-        QString colPart = match.captured(1);    // 如 "B"
-        QString rowPart = match.captured(2);    // 如 "2"
+        QString colAbs = match.captured(1);      // $ 或空
+        QString colPart = match.captured(2);     // A-Z
+        QString rowAbs = match.captured(3);      // $ 或空
+        QString rowPart = match.captured(4);     // 数字
 
         int originalRow = rowPart.toInt();
-        int newRow = originalRow + rowOffset;
 
-        QString newCellRef = colPart + QString::number(newRow);
+        // ✅ 只有非绝对引用才调整
+        int newRow = rowAbs.isEmpty() ? (originalRow + rowOffset) : originalRow;
+
+        QString newCellRef = colAbs + colPart + rowAbs + QString::number(newRow);
 
         result.replace(match.capturedStart(), match.capturedLength(), newCellRef);
     }
@@ -761,8 +766,23 @@ void MainWindow::onRefreshData()
 
 void MainWindow::refreshHistoryReport()
 {
-    const HistoryReportConfig& config = m_dataModel->getHistoryConfig();
+    HistoryReportConfig config = m_dataModel->getHistoryConfig();
     const TimeRangeConfig& timeRange = m_globalConfig.globalTimeRange;
+
+    //  0. 过滤掉空配置行
+    QVector<ReportColumnConfig> validColumns;
+    for (const auto& col : config.columns) {
+        if (!col.displayName.trimmed().isEmpty() && !col.rtuId.trimmed().isEmpty()) {
+            validColumns.append(col);
+        }
+    }
+
+    if (validColumns.isEmpty()) {
+        QMessageBox::warning(this, "错误", "配置中没有有效的列（名称和RTU号不能为空）");
+        return;
+    }
+
+    config.columns = validColumns;  // 使用过滤后的配置
 
     // 1. 生成时间轴
     QVector<QDateTime> timeAxis = ReportDataModel::generateTimeAxis(timeRange);
@@ -807,7 +827,7 @@ void MainWindow::refreshHistoryReport()
     // 4. 批量查询所有RTU
     TaosDataFetcher fetcher;
     QHash<QString, std::map<int64_t, std::vector<float>>> rawData;
-    QStringList failedRTUs;  // 记录失败的RTU
+    QStringList failedRTUs;
 
     for (int i = 0; i < totalColumns; i++) {
         if (progress.wasCanceled()) {
@@ -843,7 +863,7 @@ void MainWindow::refreshHistoryReport()
             rawData[col.rtuId] = {};
         }
 
-        progress.setValue(10 + i * 70 / totalColumns); 
+        progress.setValue(10 + i * 70 / totalColumns);
         qApp->processEvents();
     }
 

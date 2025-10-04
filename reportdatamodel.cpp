@@ -555,7 +555,6 @@ bool ReportDataModel::exportHistoryReportToExcel(
 
     for (int row = 0; row < totalRows; row++) {
         if (progress && progress->wasCanceled()) {
-            qDebug() << "用户取消导出";
             return false;
         }
 
@@ -565,50 +564,50 @@ bool ReportDataModel::exportHistoryReportToExcel(
 
         // 数据列
         for (int col = 0; col < totalCols; col++) {
-            QString rtuId = m_historyConfig.columns[col].rtuId;
+            int modelRow = row + 1;  // +1 因为表头占第0行
+            int modelCol = col + 1;  // +1 因为时间列占第0列
 
-            if (m_fullAlignedData.contains(rtuId) &&
-                row < m_fullAlignedData[rtuId].size()) {
-                double value = m_fullAlignedData[rtuId][row];
+            //  优先检查用户是否编辑过这个单元格
+            const CellData* cell = getCell(modelRow, modelCol);
 
-                if (std::isnan(value) || std::isinf(value)) {
-                    sheet->write(row + 2, col + 2, "N/A", dataFormat);
+            if (cell) {
+                // 导出用户编辑的内容
+                if (cell->hasFormula) {
+                    QString fullFormula = cell->formula.startsWith('=') ?
+                        cell->formula : ("=" + cell->formula);
+                    sheet->write(row + 2, col + 2, fullFormula, dataFormat);
                 }
                 else {
-                    sheet->write(row + 2, col + 2, value, dataFormat);
+                    sheet->write(row + 2, col + 2, cell->value, dataFormat);
                 }
             }
             else {
-                sheet->write(row + 2, col + 2, "N/A", dataFormat);
+                // 导出原始虚拟数据
+                QString rtuId = m_historyConfig.columns[col].rtuId;
+
+                if (m_fullAlignedData.contains(rtuId) &&
+                    row < m_fullAlignedData[rtuId].size()) {
+                    double value = m_fullAlignedData[rtuId][row];
+
+                    if (std::isnan(value) || std::isinf(value)) {
+                        sheet->write(row + 2, col + 2, "N/A", dataFormat);
+                    }
+                    else {
+                        sheet->write(row + 2, col + 2, value, dataFormat);
+                    }
+                }
+                else {
+                    sheet->write(row + 2, col + 2, "N/A", dataFormat);
+                }
             }
         }
 
-        // 每100行更新一次进度
         if (progress && row % 100 == 0) {
             int progressValue = 5 + (row * 90 / totalRows);
             progress->setValue(progressValue);
             qApp->processEvents();
         }
     }
-
-    if (progress) {
-        progress->setValue(95);
-        qApp->processEvents();
-    }
-
-    // 4. 保存文件
-    bool success = xlsx.saveAs(fileName);
-
-    if (progress) progress->setValue(100);
-
-    if (success) {
-        qDebug() << "成功导出报表到：" << fileName;
-    }
-    else {
-        qWarning() << "导出失败：" << fileName;
-    }
-
-    return success;
 }
 
 
@@ -624,15 +623,15 @@ bool ReportDataModel::setData(const QModelIndex& index, const QVariant& value, i
             int row = index.row();
             int col = index.column();
 
-            // 确保配置有足够的行
+            //  确保配置有足够的行（自动扩展，不触发信号）
             while (row >= m_historyConfig.columns.size()) {
                 ReportColumnConfig newConfig;
                 m_historyConfig.columns.append(newConfig);
-                // 动态扩展模型行数
-                beginInsertRows(QModelIndex(), m_historyConfig.columns.size() - 1,
-                    m_historyConfig.columns.size() - 1);
-                m_maxRow = m_historyConfig.columns.size();
-                endInsertRows();
+            }
+
+            // 同步更新模型行数（如果需要）
+            if (row + 1 > m_maxRow) {
+                m_maxRow = row + 1;
             }
 
             // 修改配置
@@ -680,7 +679,7 @@ bool ReportDataModel::setData(const QModelIndex& index, const QVariant& value, i
         }
     }
 
-
+    // ===== 实时模式编辑（保持原有逻辑）=====
     CellData* cell = ensureCell(index.row(), index.column());
     if (!cell) return false;
 
@@ -694,7 +693,6 @@ bool ReportDataModel::setData(const QModelIndex& index, const QVariant& value, i
         cell->formula.clear();
         cell->value = "0";
         resolveDataBindings();
-
     }
     else if (text.startsWith('=')) {
         cell->isDataBinding = false;
@@ -703,7 +701,6 @@ bool ReportDataModel::setData(const QModelIndex& index, const QVariant& value, i
     }
     else {
         cell->isDataBinding = false;
-        // 如果之前是公式，现在清空
         if (cell->hasFormula) {
             cell->formula.clear();
             cell->hasFormula = false;
@@ -711,7 +708,6 @@ bool ReportDataModel::setData(const QModelIndex& index, const QVariant& value, i
         cell->value = value;
     }
 
-    // 通知视图更新
     emit dataChanged(index, index, { role });
     emit cellChanged(index.row(), index.column());
     return true;
