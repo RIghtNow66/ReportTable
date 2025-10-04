@@ -608,6 +608,16 @@ bool ReportDataModel::exportHistoryReportToExcel(
             qApp->processEvents();
         }
     }
+
+    // 添加保存和返回
+    if (progress) progress->setValue(100);
+
+    if (!xlsx.saveAs(fileName)) {
+        qWarning() << "保存Excel失败:" << fileName;
+        return false;
+    }
+
+    return true;
 }
 
 
@@ -1185,4 +1195,23 @@ void ReportDataModel::updateGlobalTimeRange(const TimeRangeConfig& timeRange)
     emit dataChanged(index(0, 0), index(m_maxRow - 1, m_maxCol - 1));
 }
 
+void ReportDataModel::restoreBindingsToConfigStage()
+{
+    if (m_currentMode != REALTIME_MODE) {
+        qWarning() << "还原配置仅支持实时模式";
+        return;
+    }
 
+    for (auto it = m_cells.begin(); it != m_cells.end(); ++it) {
+        CellData* cell = it.value();
+        if (cell && cell->isDataBinding) {
+            // 将数值恢复为 ##RTU号
+            cell->value = cell->bindingKey;
+        }
+    }
+
+    // 通知视图刷新所有单元格
+    emit dataChanged(index(0, 0), index(m_maxRow - 1, m_maxCol - 1));
+
+    qDebug() << "实时模式配置已还原";
+}

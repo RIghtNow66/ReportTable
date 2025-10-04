@@ -273,7 +273,7 @@ bool ExcelHandler::saveToFile(const QString& fileName, ReportDataModel* model)
     const double pixelToPointRatio = 0.75; // 像素转磅
     for (int i = 0; i < rowHeights.size(); ++i) {
         if (rowHeights[i] > 0) {
-            worksheet->setColumnWidth(i + 1, i + 1, rowHeights[i] * pixelToPointRatio);
+            worksheet->setRowHeight(i + 1, i + 1, rowHeights[i] * pixelToPointRatio);
         }
     }
     const auto& colWidths = model->getAllColumnWidths();

@@ -61,6 +61,7 @@ void MainWindow::setupToolBar()
     m_toolBar->addSeparator();
 
     m_toolBar->addAction("刷新数据", this, &MainWindow::onRefreshData);
+    m_toolBar->addAction("还原配置", this, &MainWindow::onRestoreConfig);
     m_toolBar->addSeparator();
 
     // 工具操作
@@ -890,4 +891,78 @@ void MainWindow::refreshHistoryReport()
         QMessageBox::information(this, "成功", message);
     }
 }
+
+void MainWindow::onRestoreConfig()
+{
+    ReportDataModel::WorkMode mode = m_dataModel->currentMode();
+
+    if (mode == ReportDataModel::HISTORY_MODE) {
+        // ========== 历史模式：还原到配置阶段 ==========
+
+        // 检查是否已加载配置
+        if (m_dataModel->getHistoryConfig().columns.isEmpty()) {
+            QMessageBox::warning(this, "错误",
+                "未加载配置文件，请先导入 #REPO_ 开头的配置文件。");
+            return;
+        }
+
+        // 如果已经在配置阶段，无需还原
+        if (!m_dataModel->hasHistoryData()) {
+            QMessageBox::information(this, "提示", "当前已经在配置编辑状态。");
+            return;
+        }
+
+        // 确认操作
+        auto reply = QMessageBox::question(this, "确认还原",
+            "还原配置将清空当前报表数据，是否继续？\n\n"
+            "还原后您可以修改配置，然后点击 [刷新数据] 重新生成报表。",
+            QMessageBox::Yes | QMessageBox::No,
+            QMessageBox::No);
+
+        if (reply == QMessageBox::No) {
+            return;
+        }
+
+        // 还原配置（清空报表数据，显示2列配置）
+        m_dataModel->displayConfigFileContent();
+
+        QMessageBox::information(this, "配置已还原",
+            "配置文件已还原为2列编辑模式：\n"
+            "• 第1列：显示名称\n"
+            "• 第2列：RTU号\n\n"
+            "您可以修改、新增或删除配置行，\n"
+            "完成后点击 [刷新数据] 重新生成报表。");
+    }
+    else if (mode == ReportDataModel::REALTIME_MODE) {
+        // ========== 实时模式：绑定单元格恢复为 ##RTU号 ==========
+
+        // 检查是否有数据绑定
+        if (!m_dataModel->hasDataBindings()) {
+            QMessageBox::information(this, "提示",
+                "当前表格中没有数据绑定（##标记的单元格）。\n\n"
+                "如需使用数据绑定功能，请在单元格中输入 ##YC001 格式。");
+            return;
+        }
+
+        // 确认操作
+        auto reply = QMessageBox::question(this, "确认还原配置",
+            "此操作将把所有数据绑定单元格的值恢复为 ##RTU号 格式。\n\n"
+            "完成后点击 [刷新数据] 重新查询。\n\n"
+            "是否继续？",
+            QMessageBox::Yes | QMessageBox::No,
+            QMessageBox::No);
+
+        if (reply == QMessageBox::No) {
+            return;
+        }
+
+        // 还原配置
+        m_dataModel->restoreBindingsToConfigStage();
+
+        QMessageBox::information(this, "配置已还原",
+            "修改完成后点击 [刷新数据] 重新绑定实时数据。");
+    }
+}
+
+
 

@@ -109,6 +109,8 @@ public:
 
     QFont ensureFontAvailable(const QFont& requestedFont) const;
 
+    void restoreBindingsToConfigStage();
+
 private:
     QVariant getRealtimeCellData(const QModelIndex& index, int role) const;
     QVariant getHistoryReportCellData(const QModelIndex& index, int role) const;
